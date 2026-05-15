@@ -1,0 +1,10 @@
+{
+  "name": "mafia-casefile",
+  "private": true,
+  "scripts": {
+    "lint": "echo \"lint placeholder\"",
+    "test": "echo \"test placeholder\"",
+    "build": "echo \"build placeholder\""
+  },
+  "devDependencies": {}
+}
