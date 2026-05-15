@@ -10,6 +10,7 @@
     "test": "node --import tsx --test src/users/user.repository.spec.ts",
     "test:auth": "node --import tsx --test src/auth/auth.service.spec.ts",
     "test:redis": "node --import tsx --test src/redis/redis.service.spec.ts",
+    "test:socket": "node --import tsx --test src/realtime/realtime.gateway.spec.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:seed": "prisma db seed"
@@ -18,6 +19,8 @@
     "@nestjs/common": "latest",
     "@nestjs/core": "latest",
     "@nestjs/platform-express": "latest",
+    "@nestjs/platform-socket.io": "latest",
+    "@nestjs/websockets": "latest",
     "@prisma/adapter-pg": "latest",
     "@prisma/client": "latest",
     "bcryptjs": "latest",
@@ -25,7 +28,9 @@
     "jsonwebtoken": "latest",
     "pg": "latest",
     "reflect-metadata": "latest",
-    "rxjs": "latest"
+    "rxjs": "latest",
+    "socket.io": "latest",
+    "socket.io-client": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
