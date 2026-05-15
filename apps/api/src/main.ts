@@ -7,6 +7,8 @@ async function bootstrap() {
     logger: ['error', 'warn', 'log'],
   });
 
+  app.enableShutdownHooks();
+
   const port = Number(process.env.API_PORT ?? 3001);
   const safePort = Number.isFinite(port) && port > 0 ? port : 3001;
 
