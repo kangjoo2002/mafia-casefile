@@ -10,6 +10,6 @@ import { PasswordService } from './password.service';
   imports: [PrismaModule],
   controllers: [AuthController],
   providers: [AuthService, PasswordService, JwtService, UserRepository],
-  exports: [AuthService],
+  exports: [AuthService, JwtService],
 })
 export class AuthModule {}

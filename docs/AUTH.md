@@ -40,3 +40,18 @@ JWT 서명에는 `JWT_SECRET` 환경변수를 사용한다. 값이 없으면 로
 - 회원가입: 필수 값이 비어 있으면 `400 Bad Request`
 - 회원가입: 중복 이메일이면 `409 Conflict`
 - 로그인: 사용자가 없거나 비밀번호가 틀리면 `401 Unauthorized`
+
+## Socket.IO 인증
+
+Socket.IO 연결 시 `auth.token`에 accessToken을 전달한다.
+
+JWT payload의 `sub`는 `userId` 기준이며, 서버는 인증 성공 시 `socket.data.user`에 아래 형태를 저장한다.
+
+```json
+{
+  "id": "userId",
+  "email": "user@example.com"
+}
+```
+
+토큰이 없거나 잘못된 경우 연결은 실패한다.
