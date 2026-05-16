@@ -21,6 +21,14 @@
 - `SELECT_POLICE_TARGET`는 살아있는 경찰만 사용할 수 있다.
 - 밤 액션 결과는 `GameSession.nightActions`에 반영되고, `GameEventLog`에도 기록된다.
 
+## 채팅
+
+- `SEND_CHAT_MESSAGE`의 `LOBBY` 채널은 `WAITING` room의 participant만 사용할 수 있다.
+- `SEND_CHAT_MESSAGE`의 `DAY` 채널은 `DAY_DISCUSSION` phase의 살아 있는 player만 사용할 수 있다.
+- 죽은 player는 `DAY` 채팅을 보낼 수 없다.
+- `MAFIA` / `GHOST` / `END` 채팅은 아직 미지원이다.
+- `SYSTEM` 채팅은 서버 발행용 구조만 정의되어 있고, client command는 아직 미지원이다.
+
 ## 투표
 
 - `CAST_VOTE`는 `VOTING` phase에서만 허용된다.

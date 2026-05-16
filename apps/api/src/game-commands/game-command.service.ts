@@ -1,6 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { EventVisibility } from '@prisma/client';
-import type { Role } from '@mafia-casefile/shared';
+import type {
+  ChatChannel,
+  ChatMessageEvent,
+  Role,
+} from '@mafia-casefile/shared';
 import { GameEventRecorderService } from '../game-events/game-event-recorder.service';
 import {
   GameSessionService,
@@ -33,6 +37,18 @@ type VoteCommandPayload = {
 
 type NightTargetCommandPayload = {
   targetUserId?: unknown;
+};
+
+type SupportedChatChannel = 'LOBBY' | 'DAY';
+
+type ChatCommandPayload = {
+  channel?: unknown;
+  message?: unknown;
+};
+
+type ParsedChatCommandPayload = {
+  channel: SupportedChatChannel;
+  message: string;
 };
 
 function isNonEmptyString(value: unknown): value is string {
@@ -83,6 +99,8 @@ export class GameCommandService {
         return await this.handleNightTargetCommand(command, user, 'doctor');
       case 'SELECT_POLICE_TARGET':
         return await this.handleNightTargetCommand(command, user, 'police');
+      case 'SEND_CHAT_MESSAGE':
+        return await this.handleSendChatMessage(command, user);
       default:
         return this.accept(command.requestId, command.type, []);
     }
@@ -856,6 +874,275 @@ export class GameCommandService {
 
       return this.reject(parsed.requestId, reason, message);
     }
+  }
+
+  private async handleSendChatMessage(
+    parsed: GameCommandEnvelope,
+    user: GameCommandUser | null | undefined,
+  ): Promise<GameCommandResult> {
+    if (!user) {
+      return this.reject(
+        parsed.requestId,
+        'UNAUTHORIZED',
+        'Socket user is missing.',
+      );
+    }
+
+    const payloadResult = this.parseChatPayload(parsed.payload);
+    if (!payloadResult.ok) {
+      return this.reject(
+        parsed.requestId,
+        payloadResult.reason,
+        payloadResult.message,
+      );
+    }
+
+    const sentAt = new Date().toISOString();
+
+    if (payloadResult.payload.channel === 'LOBBY') {
+      return await this.handleLobbyChat(
+        parsed,
+        user,
+        payloadResult.payload,
+        sentAt,
+      );
+    }
+
+    return await this.handleDayChat(
+      parsed,
+      user,
+      payloadResult.payload,
+      sentAt,
+    );
+  }
+
+  private async handleLobbyChat(
+    parsed: GameCommandEnvelope,
+    user: GameCommandUser,
+    payload: ParsedChatCommandPayload,
+    sentAt: string,
+  ): Promise<GameCommandResult> {
+    const room = this.roomsService.findRoomById(parsed.gameId);
+
+    if (!room) {
+      return this.reject(
+        parsed.requestId,
+        'ROOM_NOT_FOUND',
+        'room not found',
+      );
+    }
+
+    if (room.status !== 'WAITING') {
+      return this.reject(
+        parsed.requestId,
+        'CHAT_NOT_ALLOWED_IN_CURRENT_PHASE',
+        'chat is not allowed in current phase',
+      );
+    }
+
+    const participant = room.participants.find(
+      (current) => current.userId === user.id,
+    );
+
+    if (!participant) {
+      return this.reject(
+        parsed.requestId,
+        'PARTICIPANT_NOT_FOUND',
+        'participant not found',
+      );
+    }
+
+    const event = this.buildChatMessageEvent({
+      gameId: parsed.gameId,
+      channel: payload.channel,
+      message: payload.message,
+      senderUserId: user.id,
+      sentAt,
+    });
+
+    await this.gameEventRecorder.recordEvent({
+      gameId: parsed.gameId,
+      type: 'ChatMessageSent',
+      turn: 0,
+      phase: 'WAITING',
+      actorUserId: user.id,
+      payload: {
+        channel: payload.channel,
+        message: payload.message,
+        senderUserId: user.id,
+      },
+      visibilityDuringGame: EventVisibility.PUBLIC,
+      visibilityAfterGame: EventVisibility.PUBLIC,
+      requestId: parsed.requestId,
+    });
+
+    return this.accept(parsed.requestId, parsed.type, [
+      {
+        kind: 'broadcast',
+        roomId: parsed.gameId,
+        eventName: 'chat:message',
+        payload: event,
+      },
+    ]);
+  }
+
+  private async handleDayChat(
+    parsed: GameCommandEnvelope,
+    user: GameCommandUser,
+    payload: ParsedChatCommandPayload,
+    sentAt: string,
+  ): Promise<GameCommandResult> {
+    const session = await this.gameSessionService.findByGameId(parsed.gameId);
+
+    if (!session) {
+      return this.reject(
+        parsed.requestId,
+        'GAME_SESSION_NOT_FOUND',
+        'game session not found',
+      );
+    }
+
+    if (session.phase !== 'DAY_DISCUSSION') {
+      return this.reject(
+        parsed.requestId,
+        'CHAT_NOT_ALLOWED_IN_CURRENT_PHASE',
+        'chat is not allowed in current phase',
+      );
+    }
+
+    const actor = session.players.find((player) => player.userId === user.id);
+
+    if (!actor) {
+      return this.reject(
+        parsed.requestId,
+        'PLAYER_NOT_IN_GAME',
+        'player not found in game session',
+      );
+    }
+
+    if (actor.status !== 'ALIVE') {
+      return this.reject(
+        parsed.requestId,
+        'PLAYER_NOT_ALIVE',
+        'player is not alive',
+      );
+    }
+
+    const event = this.buildChatMessageEvent({
+      gameId: parsed.gameId,
+      channel: payload.channel,
+      message: payload.message,
+      senderUserId: user.id,
+      sentAt,
+    });
+
+    await this.gameEventRecorder.recordEvent({
+      gameId: parsed.gameId,
+      type: 'ChatMessageSent',
+      turn: session.turn,
+      phase: session.phase,
+      actorUserId: user.id,
+      payload: {
+        channel: payload.channel,
+        message: payload.message,
+        senderUserId: user.id,
+      },
+      visibilityDuringGame: EventVisibility.PUBLIC,
+      visibilityAfterGame: EventVisibility.PUBLIC,
+      requestId: parsed.requestId,
+    });
+
+    return this.accept(parsed.requestId, parsed.type, [
+      {
+        kind: 'broadcast',
+        roomId: parsed.gameId,
+        eventName: 'chat:message',
+        payload: event,
+      },
+    ]);
+  }
+
+  private parseChatPayload(
+    payload: unknown,
+  ):
+    | { ok: true; payload: ParsedChatCommandPayload }
+    | { ok: false; reason: string; message: string } {
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      return {
+        ok: false,
+        reason: 'INVALID_CHAT_COMMAND',
+        message: 'Chat command payload is invalid.',
+      };
+    }
+
+    const chatPayload = payload as ChatCommandPayload;
+
+    if (!this.isSupportedChatChannel(chatPayload.channel)) {
+      return {
+        ok: false,
+        reason: 'INVALID_CHAT_CHANNEL',
+        message: 'chat channel is invalid.',
+      };
+    }
+
+    if (typeof chatPayload.message !== 'string') {
+      return {
+        ok: false,
+        reason: 'INVALID_CHAT_MESSAGE',
+        message: 'chat message is required',
+      };
+    }
+
+    const trimmedMessage = chatPayload.message.trim();
+
+    if (trimmedMessage.length === 0) {
+      return {
+        ok: false,
+        reason: 'INVALID_CHAT_MESSAGE',
+        message: 'chat message is required',
+      };
+    }
+
+    if (trimmedMessage.length > 500) {
+      return {
+        ok: false,
+        reason: 'CHAT_MESSAGE_TOO_LONG',
+        message: 'chat message is too long',
+      };
+    }
+
+    return {
+      ok: true,
+      payload: {
+        channel: chatPayload.channel,
+        message: trimmedMessage,
+      },
+    };
+  }
+
+  private isSupportedChatChannel(value: unknown): value is SupportedChatChannel {
+    return value === 'LOBBY' || value === 'DAY';
+  }
+
+  private buildChatMessageEvent(input: {
+    gameId: string;
+    channel: ChatChannel;
+    message: string;
+    senderUserId: string | null;
+    sentAt: string;
+  }): ChatMessageEvent {
+    return {
+      type: 'chat:message',
+      gameId: input.gameId,
+      channel: input.channel,
+      message: input.message,
+      senderUserId: input.senderUserId,
+      sentAt: input.sentAt,
+    };
   }
 
   private buildRoleAssignments(room: Room) {

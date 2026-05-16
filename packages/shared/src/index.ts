@@ -12,6 +12,8 @@ export type {
   EventVisibility,
 } from "./protocol";
 export type {
+  ChatChannel,
+  ChatMessageEvent,
   GameStartedEvent,
   PongEvent,
   PhaseChangedEvent,

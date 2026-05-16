@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type {
+  ChatMessageEvent,
   GameStartedEvent,
   PhaseChangedEvent,
   RoleAssignedEvent,
@@ -257,6 +258,26 @@ function voteCommand(
     payload: {
       targetUserId,
     },
+  });
+}
+
+function chatCommand(
+  socket: Socket,
+  roomId: string,
+  payload: unknown,
+  requestId: string,
+) {
+  return sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(socket, {
+    type: 'SEND_CHAT_MESSAGE',
+    requestId,
+    gameId: roomId,
+    payload,
   });
 }
 
@@ -867,6 +888,592 @@ test('room join and leave broadcast participant updates and record events', asyn
 
   hostSocket.disconnect();
   guestSocket.disconnect();
+});
+
+test('lobby chat broadcasts and records messages', async () => {
+  const roomsService = app.get(RoomsService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-lobby-host',
+    name: 'chat-lobby',
+  });
+
+  const host = buildAuthedSocket('chat-lobby-host', 'chat-lobby-host@example.com');
+  const guest = buildAuthedSocket('chat-lobby-guest', 'chat-lobby-guest@example.com');
+
+  await Promise.all([waitForConnect(host.socket), waitForConnect(guest.socket)]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-chat-lobby-join-1');
+  await joinRoomCommand(guest.socket, room.roomId, 'guest', 'req-chat-lobby-join-2');
+
+  const hostReceivesChat = waitForEvent<ChatMessageEvent>(
+    host.socket,
+    'chat:message',
+  );
+  const guestReceivesChat = waitForEvent<ChatMessageEvent>(
+    guest.socket,
+    'chat:message',
+  );
+
+  const response = chatCommand(
+    host.socket,
+    room.roomId,
+    {
+      channel: 'LOBBY',
+      message: '  안녕하세요  ',
+    },
+    'req-chat-lobby-1',
+  );
+
+  const [responseMessage, hostChatEvent, guestChatEvent] = await Promise.all([
+    response,
+    hostReceivesChat,
+    guestReceivesChat,
+  ]);
+
+  assert.equal(responseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(responseMessage.requestId, 'req-chat-lobby-1');
+  assert.equal(responseMessage.receivedType, 'SEND_CHAT_MESSAGE');
+  assert.equal(hostChatEvent.type, 'chat:message');
+  assert.equal(hostChatEvent.channel, 'LOBBY');
+  assert.equal(hostChatEvent.message, '안녕하세요');
+  assert.equal(hostChatEvent.senderUserId, 'chat-lobby-host');
+  assert.equal(hostChatEvent.gameId, room.roomId);
+  assert.equal(guestChatEvent.message, '안녕하세요');
+  assert.equal(guestChatEvent.senderUserId, 'chat-lobby-host');
+
+  const events = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: 'ChatMessageSent',
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.type, 'ChatMessageSent');
+  assert.equal(events[0]?.requestId, 'req-chat-lobby-1');
+  assert.equal(events[0]?.actorUserId, 'chat-lobby-host');
+  assert.equal(events[0]?.turn, 0);
+  assert.equal(events[0]?.phase, 'WAITING');
+  assert.equal(events[0]?.visibilityDuringGame, 'PUBLIC');
+  assert.equal(events[0]?.visibilityAfterGame, 'PUBLIC');
+  assert.deepEqual(events[0]?.payload, {
+    channel: 'LOBBY',
+    message: '안녕하세요',
+    senderUserId: 'chat-lobby-host',
+  });
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest.socket.disconnect();
+});
+
+test('lobby chat rejects non-participant', async () => {
+  const roomsService = app.get(RoomsService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-lobby-outsider-host',
+    name: 'chat-lobby-outsider',
+  });
+
+  const outsider = buildAuthedSocket(
+    'chat-lobby-outsider',
+    'chat-lobby-outsider@example.com',
+  );
+
+  await waitForConnect(outsider.socket);
+
+  const response = await chatCommand(
+    outsider.socket,
+    room.roomId,
+    {
+      channel: 'LOBBY',
+      message: '안녕하세요',
+    },
+    'req-chat-lobby-outsider-1',
+  );
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.reason, 'PARTICIPANT_NOT_FOUND');
+
+  outsider.socket.disconnect();
+});
+
+test('lobby chat rejects after game start', async () => {
+  const roomsService = app.get(RoomsService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-lobby-start-host',
+    name: 'chat-lobby-start',
+  });
+
+  const host = buildAuthedSocket(
+    'chat-lobby-start-host',
+    'chat-lobby-start-host@example.com',
+  );
+  const guest1 = buildAuthedSocket(
+    'chat-lobby-start-guest-1',
+    'chat-lobby-start-guest-1@example.com',
+  );
+  const guest2 = buildAuthedSocket(
+    'chat-lobby-start-guest-2',
+    'chat-lobby-start-guest-2@example.com',
+  );
+  const guest3 = buildAuthedSocket(
+    'chat-lobby-start-guest-3',
+    'chat-lobby-start-guest-3@example.com',
+  );
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-chat-lobby-start-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-chat-lobby-start-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-chat-lobby-start-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-chat-lobby-start-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-chat-lobby-start-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-chat-lobby-start-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-chat-lobby-start-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-chat-lobby-start-ready-4');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-lobby-start-1',
+  );
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+
+  const response = await chatCommand(
+    host.socket,
+    room.roomId,
+    {
+      channel: 'LOBBY',
+      message: '시작 후 채팅',
+    },
+    'req-chat-lobby-start-chat-1',
+  );
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.reason, 'CHAT_NOT_ALLOWED_IN_CURRENT_PHASE');
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('day chat broadcasts and records messages', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-day-host',
+    name: 'chat-day',
+  });
+
+  const host = buildAuthedSocket('chat-day-host', 'chat-day-host@example.com');
+  const guest1 = buildAuthedSocket('chat-day-guest-1', 'chat-day-guest-1@example.com');
+  const guest2 = buildAuthedSocket('chat-day-guest-2', 'chat-day-guest-2@example.com');
+  const guest3 = buildAuthedSocket('chat-day-guest-3', 'chat-day-guest-3@example.com');
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-chat-day-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-chat-day-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-chat-day-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-chat-day-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-chat-day-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-chat-day-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-chat-day-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-chat-day-ready-4');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-day-start-1',
+  );
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+
+  const phaseResponse = await nextPhaseCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-day-next-1',
+  );
+
+  assert.equal(phaseResponse.type, 'COMMAND_ACCEPTED');
+
+  const session = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(session);
+  assert.equal(session?.phase, 'DAY_DISCUSSION');
+
+  const hostReceivesChat = waitForEvent<ChatMessageEvent>(
+    host.socket,
+    'chat:message',
+  );
+  const guestReceivesChat = waitForEvent<ChatMessageEvent>(
+    guest1.socket,
+    'chat:message',
+  );
+
+  const response = chatCommand(
+    host.socket,
+    room.roomId,
+    {
+      channel: 'DAY',
+      message: '시민입니다.',
+    },
+    'req-chat-day-1',
+  );
+
+  const [responseMessage, hostChatEvent, guestChatEvent] = await Promise.all([
+    response,
+    hostReceivesChat,
+    guestReceivesChat,
+  ]);
+
+  assert.equal(responseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(responseMessage.receivedType, 'SEND_CHAT_MESSAGE');
+  assert.equal(hostChatEvent.channel, 'DAY');
+  assert.equal(hostChatEvent.message, '시민입니다.');
+  assert.equal(hostChatEvent.senderUserId, 'chat-day-host');
+  assert.equal(guestChatEvent.channel, 'DAY');
+  assert.equal(guestChatEvent.message, '시민입니다.');
+
+  const events = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: 'ChatMessageSent',
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.phase, 'DAY_DISCUSSION');
+  assert.equal(events[0]?.turn, session?.turn);
+  assert.deepEqual(events[0]?.payload, {
+    channel: 'DAY',
+    message: '시민입니다.',
+    senderUserId: 'chat-day-host',
+  });
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('day chat rejects outside DAY_DISCUSSION', async () => {
+  const roomsService = app.get(RoomsService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-day-night-host',
+    name: 'chat-day-night',
+  });
+
+  const host = buildAuthedSocket(
+    'chat-day-night-host',
+    'chat-day-night-host@example.com',
+  );
+  const guest1 = buildAuthedSocket(
+    'chat-day-night-guest-1',
+    'chat-day-night-guest-1@example.com',
+  );
+  const guest2 = buildAuthedSocket(
+    'chat-day-night-guest-2',
+    'chat-day-night-guest-2@example.com',
+  );
+  const guest3 = buildAuthedSocket(
+    'chat-day-night-guest-3',
+    'chat-day-night-guest-3@example.com',
+  );
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-chat-day-night-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-chat-day-night-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-chat-day-night-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-chat-day-night-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-chat-day-night-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-chat-day-night-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-chat-day-night-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-chat-day-night-ready-4');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-day-night-start-1',
+  );
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+
+  const response = await chatCommand(
+    host.socket,
+    room.roomId,
+    {
+      channel: 'DAY',
+      message: '아직 밤입니다.',
+    },
+    'req-chat-day-night-chat-1',
+  );
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.reason, 'CHAT_NOT_ALLOWED_IN_CURRENT_PHASE');
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('day chat rejects dead player', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-day-dead-host',
+    name: 'chat-day-dead',
+  });
+
+  const host = buildAuthedSocket('chat-day-dead-host', 'chat-day-dead-host@example.com');
+  const guest1 = buildAuthedSocket('chat-day-dead-guest-1', 'chat-day-dead-guest-1@example.com');
+  const guest2 = buildAuthedSocket('chat-day-dead-guest-2', 'chat-day-dead-guest-2@example.com');
+  const guest3 = buildAuthedSocket('chat-day-dead-guest-3', 'chat-day-dead-guest-3@example.com');
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-chat-day-dead-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-chat-day-dead-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-chat-day-dead-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-chat-day-dead-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-chat-day-dead-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-chat-day-dead-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-chat-day-dead-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-chat-day-dead-ready-4');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-day-dead-start-1',
+  );
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+
+  const startedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(startedSession);
+
+  const socketsByUserId = new Map<string, Socket>([
+    ['chat-day-dead-host', host.socket],
+    ['chat-day-dead-guest-1', guest1.socket],
+    ['chat-day-dead-guest-2', guest2.socket],
+    ['chat-day-dead-guest-3', guest3.socket],
+  ]);
+
+  const mafiaPlayer = startedSession?.players.find(
+    (player) => player.role === 'MAFIA',
+  );
+  const doctorPlayer = startedSession?.players.find(
+    (player) => player.role === 'DOCTOR',
+  );
+  const policePlayer = startedSession?.players.find(
+    (player) => player.role === 'POLICE',
+  );
+  const citizenPlayer = startedSession?.players.find(
+    (player) => player.role === 'CITIZEN',
+  );
+
+  assert.ok(mafiaPlayer);
+  assert.ok(doctorPlayer);
+  assert.ok(policePlayer);
+  assert.ok(citizenPlayer);
+
+  const mafiaSocket = socketsByUserId.get(mafiaPlayer.userId);
+  const doctorSocket = socketsByUserId.get(doctorPlayer.userId);
+  const policeSocket = socketsByUserId.get(policePlayer.userId);
+  const citizenSocket = socketsByUserId.get(citizenPlayer.userId);
+
+  assert.ok(mafiaSocket);
+  assert.ok(doctorSocket);
+  assert.ok(policeSocket);
+  assert.ok(citizenSocket);
+
+  await nightActionCommand(
+    mafiaSocket,
+    'SELECT_MAFIA_TARGET',
+    room.roomId,
+    citizenPlayer.userId,
+    'req-chat-day-dead-mafia-1',
+  );
+  await nightActionCommand(
+    doctorSocket,
+    'SELECT_DOCTOR_TARGET',
+    room.roomId,
+    mafiaPlayer.userId,
+    'req-chat-day-dead-doctor-1',
+  );
+  await nightActionCommand(
+    policeSocket,
+    'SELECT_POLICE_TARGET',
+    room.roomId,
+    mafiaPlayer.userId,
+    'req-chat-day-dead-police-1',
+  );
+
+  await nextPhaseCommand(host.socket, room.roomId, 'req-chat-day-dead-next-1');
+
+  const resolvedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(resolvedSession);
+  assert.equal(
+    resolvedSession?.players.find(
+      (player) => player.userId === citizenPlayer.userId,
+    )?.status,
+    'DEAD',
+  );
+
+  const response = await chatCommand(
+    citizenSocket,
+    room.roomId,
+    {
+      channel: 'DAY',
+      message: '저는 죽었습니다.',
+    },
+    'req-chat-day-dead-chat-1',
+  );
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.reason, 'PLAYER_NOT_ALIVE');
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('invalid chat payloads are rejected', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'chat-invalid-user',
+    email: 'chat-invalid@example.com',
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  const invalidCommandResponse = await chatCommand(
+    socket,
+    'chat-invalid-room',
+    null,
+    'req-chat-invalid-1',
+  );
+  assert.equal(invalidCommandResponse.type, 'COMMAND_REJECTED');
+  assert.equal(invalidCommandResponse.reason, 'INVALID_CHAT_COMMAND');
+
+  const invalidChannelResponse = await chatCommand(
+    socket,
+    'chat-invalid-room',
+    {
+      channel: 'SYSTEM',
+      message: '안녕하세요',
+    },
+    'req-chat-invalid-2',
+  );
+  assert.equal(invalidChannelResponse.type, 'COMMAND_REJECTED');
+  assert.equal(invalidChannelResponse.reason, 'INVALID_CHAT_CHANNEL');
+
+  const missingMessageResponse = await chatCommand(
+    socket,
+    'chat-invalid-room',
+    {
+      channel: 'DAY',
+    },
+    'req-chat-invalid-3',
+  );
+  assert.equal(missingMessageResponse.type, 'COMMAND_REJECTED');
+  assert.equal(missingMessageResponse.reason, 'INVALID_CHAT_MESSAGE');
+
+  const emptyMessageResponse = await chatCommand(
+    socket,
+    'chat-invalid-room',
+    {
+      channel: 'DAY',
+      message: '   ',
+    },
+    'req-chat-invalid-4',
+  );
+  assert.equal(emptyMessageResponse.type, 'COMMAND_REJECTED');
+  assert.equal(emptyMessageResponse.reason, 'INVALID_CHAT_MESSAGE');
+
+  const longMessageResponse = await chatCommand(
+    socket,
+    'chat-invalid-room',
+    {
+      channel: 'DAY',
+      message: 'a'.repeat(501),
+    },
+    'req-chat-invalid-5',
+  );
+  assert.equal(longMessageResponse.type, 'COMMAND_REJECTED');
+  assert.equal(longMessageResponse.reason, 'CHAT_MESSAGE_TOO_LONG');
+
+  socket.disconnect();
 });
 
 test('start game rejects when room is too small', async () => {

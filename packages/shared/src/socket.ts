@@ -6,6 +6,17 @@ export interface SocketUser {
   email: string;
 }
 
+export type ChatChannel = "LOBBY" | "DAY" | "SYSTEM";
+
+export interface ChatMessageEvent {
+  type: "chat:message";
+  gameId: string;
+  channel: ChatChannel;
+  message: string;
+  senderUserId: string | null;
+  sentAt: string;
+}
+
 export interface PongEvent {
   type: "pong";
   timestamp: string;

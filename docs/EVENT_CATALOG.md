@@ -16,6 +16,7 @@
 - `START_GAME`은 `GameStarted`와 `RoleAssigned`를 남기고, 역할은 개인에게만 전송된다.
 - `NEXT_PHASE`는 `PhaseChanged`를 남기고, phase 전환은 `NIGHT` / `DAY_DISCUSSION` / `VOTING` / `RESULT` 순환 흐름을 따른다.
 - `SELECT_MAFIA_TARGET` / `SELECT_DOCTOR_TARGET` / `SELECT_POLICE_TARGET`는 `NIGHT`에서만 허용되고, 각 선택은 대응하는 night event로 저장된다.
+- `SEND_CHAT_MESSAGE`는 LOBBY / DAY 채팅이 확정될 때 `ChatMessageSent`를 남긴다. 현재 지원 채널은 LOBBY, DAY다. SYSTEM 메시지는 서버 발행용 구조만 정의되어 있고, client command는 아직 미지원이다.
 - `CAST_VOTE`는 `VOTING`에서만 허용되고, requestId 중복은 1차로 차단된다.
 - `NEXT_PHASE`가 결과 phase로 넘어갈 때는 `PhaseChanged`가 먼저 기록되고, 그 뒤에 `PlayerKilled`, `PlayerExecuted`, `GameFinished`가 이어질 수 있다.
 - room 참여 변경은 `room:updated` broadcast와 함께 반영된다.
@@ -64,7 +65,7 @@
 | GameStarted | 게임 시작이 확정될 때 | system | gameId, startedByUserId | PUBLIC | PUBLIC | 초기 상태 전환 기준 |
 | RoleAssigned | 역할 배정이 확정될 때 | system | userId, role | PRIVATE | PUBLIC | 각 사용자에게 개인 전달 |
 | PhaseChanged | phase 전환이 확정될 때 | system | fromPhase, toPhase, turn | PUBLIC | PUBLIC | 타임라인 기준 이벤트 |
-| ChatMessageSent | 채팅 전송이 확정될 때 | user | channel, message | PUBLIC | PUBLIC | 이후 채팅 기능에서 사용 |
+| ChatMessageSent | 로비 또는 낮 채팅이 확정될 때 | user | channel, message, senderUserId | PUBLIC | PUBLIC | 현재는 LOBBY / DAY만 지원하고, SYSTEM은 서버 발행용 구조만 정의한다 |
 | VoteCasted | 투표가 확정될 때 | user | targetUserId, voteType | PUBLIC | PUBLIC | 현재 표 상태의 근거 |
 | PlayerExecuted | 처형이 확정될 때 | system | targetUserId, voteResult | PUBLIC | PUBLIC | 낮 phase 결과 |
 | PlayerKilled | 사망이 확정될 때 | system | targetUserId, cause | PUBLIC | PUBLIC | 밤 phase 결과 |
@@ -98,6 +99,9 @@
 - viewer role 기반 visibility 필터링
 - 인증/인가 기반 timeline 접근 제어
 - includePrivate 같은 관리자/개발용 조회 옵션
-- 실제 채팅 command handler
+- MAFIA / GHOST / END 채팅 command
+- SEND_SYSTEM_MESSAGE command
+- 채팅 Redis 캐시
+- rate limiting
 
 기본 timeline 조회 API는 추가되었고, 현재 응답은 `visibilityAfterGame = PUBLIC` 사건만 포함한다. viewer role 기반 세부 공개 범위 필터링은 이후 작업에서 구현한다.
