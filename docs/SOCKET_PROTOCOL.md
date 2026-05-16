@@ -2,7 +2,7 @@
 
 ## 현재 범위
 
-현재 Socket.IO 프로토콜은 JWT handshake 인증, `ping` / `pong`, `whoami`, 공통 `command` envelope 검증, `JOIN_ROOM` / `LEAVE_ROOM`, `room:updated` 브로드캐스트, 그리고 `command:accepted` / `command:rejected` 응답을 제공한다.
+현재 Socket.IO 프로토콜은 JWT handshake 인증, `ping` / `pong`, `whoami`, 공통 `command` envelope 검증, `JOIN_ROOM` / `LEAVE_ROOM` / `CHANGE_READY`, `room:updated` 브로드캐스트, 그리고 `command:accepted` / `command:rejected` 응답을 제공한다.
 
 ## 연결
 
@@ -81,6 +81,25 @@ io('http://localhost:3001', {
 ```
 
 room이 없거나, 참여할 수 없거나, room 참가자가 아니면 `command:rejected`로 응답한다.
+
+## ready change
+
+클라이언트는 `command` 이벤트로 room 참여자의 준비 상태를 바꾼다.
+
+```json
+{
+  "type": "CHANGE_READY",
+  "requestId": "req-4",
+  "gameId": "room-123",
+  "payload": {
+    "isReady": true
+  }
+}
+```
+
+성공하면 서버는 `room:updated`로 room snapshot과 participant list를 broadcast하고, 해당 command를 `command:accepted`로 응답한다. 준비 상태는 참가자별 `isReady` 값으로 반영된다.
+
+room이 없거나, room 참가자가 아니거나, `isReady`가 boolean이 아니면 `command:rejected`로 응답한다.
 
 ## command
 

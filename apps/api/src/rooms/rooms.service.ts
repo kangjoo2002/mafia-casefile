@@ -6,6 +6,7 @@ export type RoomStatus = 'WAITING' | 'IN_PROGRESS' | 'FINISHED';
 export interface RoomParticipant {
   userId: string;
   nickname: string;
+  isReady: boolean;
   joinedAt: Date;
 }
 
@@ -79,6 +80,7 @@ export class RoomsService {
         {
           userId: input.hostUserId.trim(),
           nickname: input.hostUserId.trim(),
+          isReady: false,
           joinedAt: now,
         },
       ],
@@ -149,11 +151,50 @@ export class RoomsService {
       room.participants.push({
         userId: participant.userId.trim(),
         nickname: participant.nickname.trim(),
+        isReady: false,
         joinedAt: now,
       });
     }
 
     room.updatedAt = now;
+    const snapshot = normalizeRoom(room);
+    this.rooms.set(roomId, snapshot);
+    return cloneRoom(snapshot);
+  }
+
+  changeReady(roomId: string, userId: string, isReady: boolean): Room {
+    if (!isNonEmptyString(roomId)) {
+      throw new BadRequestException('roomId is required');
+    }
+
+    if (!isNonEmptyString(userId)) {
+      throw new BadRequestException('userId is required');
+    }
+
+    if (typeof isReady !== 'boolean') {
+      throw new BadRequestException('isReady must be a boolean');
+    }
+
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      throw new BadRequestException('room not found');
+    }
+
+    if (room.status !== 'WAITING') {
+      throw new BadRequestException('room is not joinable');
+    }
+
+    const participant = room.participants.find(
+      (current) => current.userId === userId.trim(),
+    );
+
+    if (!participant) {
+      throw new BadRequestException('participant not found');
+    }
+
+    participant.isReady = isReady;
+    room.updatedAt = new Date();
+
     const snapshot = normalizeRoom(room);
     this.rooms.set(roomId, snapshot);
     return cloneRoom(snapshot);
