@@ -15,9 +15,12 @@ import { JwtService } from '../auth/jwt.service';
 import { GameEventRecorderService } from '../game-events/game-event-recorder.service';
 import { RoomsService, type Room } from '../rooms/rooms.service';
 import type {
+  GameStartedEvent,
   CommandAcceptedEvent,
   CommandRejectedEvent,
   PongEvent,
+  Role,
+  RoleAssignedEvent,
   WhoamiEvent,
 } from '@mafia-casefile/shared';
 import { parseCommandEnvelope } from './command-envelope';
@@ -46,6 +49,17 @@ type RoomCommandEnvelope = {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function shuffle<T>(items: T[]) {
+  const values = [...items];
+
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
+  }
+
+  return values;
 }
 
 @WebSocketGateway({
@@ -95,8 +109,14 @@ export class RealtimeGateway
 
   handleConnection(client: Socket) {
     const authedClient = client as AuthenticatedSocket;
+    const user = authedClient.data.user;
+
+    if (user) {
+      void client.join(`user:${user.id}`);
+    }
+
     this.logger.log(
-      `connected ${authedClient.data.user?.id ?? authedClient.id}`,
+      `connected ${user?.id ?? authedClient.id}`,
     );
   }
 
@@ -398,6 +418,63 @@ export class RealtimeGateway
 
     try {
       const room = this.roomsService.startGame(parsed.gameId, user.id);
+      const startedAt = new Date().toISOString();
+      const roleAssignments = this.buildRoleAssignments(room);
+
+      await this.gameEventRecorder.recordEvent({
+        gameId: parsed.gameId,
+        type: 'GameStarted',
+        turn: 0,
+        phase: 'WAITING',
+        actorUserId: null,
+        payload: {
+          gameId: parsed.gameId,
+          roomId: parsed.gameId,
+          startedByUserId: user.id,
+          startedAt,
+        },
+        visibilityDuringGame: EventVisibility.PUBLIC,
+        visibilityAfterGame: EventVisibility.PUBLIC,
+        requestId: parsed.requestId,
+      });
+
+      const gameStartedEvent: GameStartedEvent = {
+        type: 'game:started',
+        gameId: parsed.gameId,
+        startedByUserId: user.id,
+        startedAt,
+      };
+
+      this.server.to(parsed.gameId).emit('game:started', gameStartedEvent);
+
+      for (const assignment of roleAssignments) {
+        await this.gameEventRecorder.recordEvent({
+          gameId: parsed.gameId,
+          type: 'RoleAssigned',
+          turn: 0,
+          phase: 'WAITING',
+          actorUserId: null,
+          payload: {
+            gameId: parsed.gameId,
+            userId: assignment.userId,
+            role: assignment.role,
+          },
+          visibilityDuringGame: EventVisibility.PRIVATE,
+          visibilityAfterGame: EventVisibility.PUBLIC,
+          requestId: parsed.requestId,
+        });
+
+        const roleAssignedEvent: RoleAssignedEvent = {
+          type: 'role:assigned',
+          gameId: parsed.gameId,
+          userId: assignment.userId,
+          role: assignment.role,
+        };
+
+        this.server
+          .to(`user:${assignment.userId}`)
+          .emit('role:assigned', roleAssignedEvent);
+      }
 
       this.server.to(parsed.gameId).emit('room:updated', {
         room,
@@ -476,5 +553,21 @@ export class RealtimeGateway
 
       this.emitRoomRejected(client, parsed.requestId, reason, message);
     }
+  }
+
+  private buildRoleAssignments(room: Room) {
+    const participants = shuffle(room.participants);
+    const rolePool: Role[] = [
+      'MAFIA',
+      'DOCTOR',
+      'POLICE',
+      ...Array.from({ length: Math.max(0, participants.length - 3) }, () => 'CITIZEN' as const),
+    ];
+    const roles = shuffle(rolePool);
+
+    return participants.map((participant, index) => ({
+      userId: participant.userId,
+      role: roles[index]!,
+    }));
   }
 }

@@ -11,4 +11,10 @@ export type {
   EventEnvelope,
   EventVisibility,
 } from "./protocol";
-export type { PongEvent, SocketUser, WhoamiEvent } from "./socket";
+export type {
+  GameStartedEvent,
+  PongEvent,
+  RoleAssignedEvent,
+  SocketUser,
+  WhoamiEvent,
+} from "./socket";
