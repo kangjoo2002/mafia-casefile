@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import type { GameStartedEvent, RoleAssignedEvent } from '@mafia-casefile/shared';
+import type {
+  GameStartedEvent,
+  PhaseChangedEvent,
+  RoleAssignedEvent,
+} from '@mafia-casefile/shared';
 import { JwtService } from '../auth/jwt.service';
+import { GameSessionService } from '../game-session/game-session.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RoomsService } from '../rooms/rooms.service';
 import { RealtimeModule } from './realtime.module';
@@ -189,6 +194,21 @@ function startGameCommand(socket: Socket, roomId: string, requestId: string) {
     message?: string;
   }>(socket, {
     type: 'START_GAME',
+    requestId,
+    gameId: roomId,
+    payload: {},
+  });
+}
+
+function nextPhaseCommand(socket: Socket, roomId: string, requestId: string) {
+  return sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(socket, {
+    type: 'NEXT_PHASE',
     requestId,
     gameId: roomId,
     payload: {},
@@ -1087,6 +1107,165 @@ test('start game rejects non-host, requires all ready, and starts room', async (
       .map((event) => (event.payload as { role: string }).role)
       .sort(),
     ['CITIZEN', 'DOCTOR', 'MAFIA', 'POLICE'].sort(),
+  );
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('next phase advances the session and broadcasts phase changes', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'phase-room-host',
+    name: 'phase-room',
+  });
+
+  const host = buildAuthedSocket('phase-room-host', 'phase-host@example.com');
+  const guest1 = buildAuthedSocket(
+    'phase-room-guest-1',
+    'phase-guest-1@example.com',
+  );
+  const guest2 = buildAuthedSocket(
+    'phase-room-guest-2',
+    'phase-guest-2@example.com',
+  );
+  const guest3 = buildAuthedSocket(
+    'phase-room-guest-3',
+    'phase-guest-3@example.com',
+  );
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-phase-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-phase-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-phase-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-phase-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-phase-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-phase-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-phase-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-phase-ready-4');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-phase-start-1',
+  );
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+  assert.equal(startResponse.receivedType, 'START_GAME');
+
+  const startedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(startedSession);
+  assert.equal(startedSession?.phase, 'NIGHT');
+  assert.equal(startedSession?.turn, 0);
+
+  const transitions = [
+    {
+      requestId: 'req-phase-next-1',
+      fromPhase: 'NIGHT',
+      toPhase: 'DAY_DISCUSSION',
+      toTurn: 1,
+    },
+    {
+      requestId: 'req-phase-next-2',
+      fromPhase: 'DAY_DISCUSSION',
+      toPhase: 'VOTING',
+      toTurn: 1,
+    },
+    {
+      requestId: 'req-phase-next-3',
+      fromPhase: 'VOTING',
+      toPhase: 'RESULT',
+      toTurn: 1,
+    },
+    {
+      requestId: 'req-phase-next-4',
+      fromPhase: 'RESULT',
+      toPhase: 'NIGHT',
+      toTurn: 1,
+    },
+  ] as const;
+
+  for (const transition of transitions) {
+    const hostPhaseChanged = waitForEvent<PhaseChangedEvent>(
+      host.socket,
+      'phase:changed',
+    );
+    const guestPhaseChanged = waitForEvent<PhaseChangedEvent>(
+      guest1.socket,
+      'phase:changed',
+    );
+
+    const response = await nextPhaseCommand(
+      host.socket,
+      room.roomId,
+      transition.requestId,
+    );
+
+    assert.equal(response.type, 'COMMAND_ACCEPTED');
+    assert.equal(response.requestId, transition.requestId);
+    assert.equal(response.receivedType, 'NEXT_PHASE');
+
+    const [hostPhaseChangedEvent, guestPhaseChangedEvent] = await Promise.all([
+      hostPhaseChanged,
+      guestPhaseChanged,
+    ]);
+
+    for (const event of [hostPhaseChangedEvent, guestPhaseChangedEvent]) {
+      assert.equal(event.type, 'phase:changed');
+      assert.equal(event.gameId, room.roomId);
+      assert.equal(event.fromPhase, transition.fromPhase);
+      assert.equal(event.toPhase, transition.toPhase);
+      assert.equal(event.turn, transition.toTurn);
+      assert.equal(event.requestedByUserId, 'phase-room-host');
+      assert.equal(typeof event.changedAt, 'string');
+      assert.ok(event.changedAt.length > 0);
+    }
+
+    const session = await gameSessionService.findByGameId(room.roomId);
+    assert.ok(session);
+    assert.equal(session?.phase, transition.toPhase);
+    assert.equal(session?.turn, transition.toTurn);
+  }
+
+  const events = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: 'PhaseChanged',
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.equal(events.length, transitions.length);
+  assert.deepEqual(
+    events.map((event) => event.requestId),
+    transitions.map((transition) => transition.requestId),
+  );
+  assert.deepEqual(
+    events.map((event) => (event.payload as { fromPhase: string }).fromPhase),
+    transitions.map((transition) => transition.fromPhase),
+  );
+  assert.deepEqual(
+    events.map((event) => (event.payload as { toPhase: string }).toPhase),
+    transitions.map((transition) => transition.toPhase),
   );
 
   await prisma.gameEventLog.deleteMany({

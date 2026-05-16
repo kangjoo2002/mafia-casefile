@@ -1,4 +1,5 @@
 import type { Role } from "./game";
+import type { GamePhase } from "./game";
 
 export interface SocketUser {
   id: string;
@@ -27,4 +28,14 @@ export interface RoleAssignedEvent {
   gameId: string;
   userId: string;
   role: Role;
+}
+
+export interface PhaseChangedEvent {
+  type: "phase:changed";
+  gameId: string;
+  fromPhase: GamePhase;
+  toPhase: GamePhase;
+  turn: number;
+  requestedByUserId: string;
+  changedAt: string;
 }

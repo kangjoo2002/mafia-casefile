@@ -13,6 +13,7 @@
 - visibility 필터링과 timeline API는 아직 구현하지 않는다.
 - `JOIN_ROOM` / `LEAVE_ROOM`은 room 참여 상태를 바꾸고 `PlayerJoined` / `PlayerLeft`를 남긴다.
 - `START_GAME`은 `GameStarted`와 `RoleAssigned`를 남기고, 역할은 개인에게만 전송된다.
+- `NEXT_PHASE`는 `PhaseChanged`를 남기고, phase 전환은 `NIGHT` / `DAY_DISCUSSION` / `VOTING` / `RESULT` 순환 흐름을 따른다.
 - room 참여 변경은 `room:updated` broadcast와 함께 반영된다.
 
 ## 2. GameEvent 기본 원칙
