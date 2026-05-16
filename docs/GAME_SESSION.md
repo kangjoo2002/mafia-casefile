@@ -27,4 +27,8 @@
 - `GameSessionRepository.save(session)`
 - `GameSessionRepository.findByGameId(gameId)`
 
-초기 구현은 `InMemoryGameSessionRepository`다. 후속 작업에서 Redis 저장소로 교체한다.
+현재 운영 경로는 `InMemoryGameSessionRepository`를 사용한다.
+Redis용 `RedisGameSessionRepository`도 추가되어 있으며, key는 `game-session:{gameId}`이고 저장값은 JSON이다.
+Date 필드는 조회 시 다시 `Date` 객체로 복원된다.
+TTL은 아직 적용하지 않는다.
+기본 저장소 전환은 다음 작업에서 진행한다.
