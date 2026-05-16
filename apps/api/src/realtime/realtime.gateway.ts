@@ -27,6 +27,10 @@ type RoomJoinCommandPayload = {
   nickname?: unknown;
 };
 
+type RoomReadyCommandPayload = {
+  isReady?: unknown;
+};
+
 type RoomUpdatedEvent = {
   room: Room;
 };
@@ -129,6 +133,11 @@ export class RealtimeGateway
 
     if (parsed.type === 'JOIN_ROOM') {
       await this.handleJoinRoom(parsed, client);
+      return;
+    }
+
+    if (parsed.type === 'CHANGE_READY') {
+      await this.handleChangeReady(parsed, client);
       return;
     }
 
@@ -255,6 +264,91 @@ export class RealtimeGateway
             ? 'ROOM_FULL'
             : message === 'room is not joinable'
               ? 'ROOM_NOT_JOINABLE'
+              : 'ROOM_COMMAND_FAILED';
+
+      this.emitRoomRejected(client, parsed.requestId, reason, message);
+    }
+  }
+
+  private async handleChangeReady(
+    parsed: RoomCommandEnvelope,
+    client: Socket,
+  ) {
+    const authedClient = client as AuthenticatedSocket;
+    const user = authedClient.data.user;
+
+    if (!user) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'UNAUTHORIZED',
+        'Socket user is missing.',
+      );
+      return;
+    }
+
+    if (
+      typeof parsed.payload !== 'object' ||
+      parsed.payload === null ||
+      Array.isArray(parsed.payload)
+    ) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'INVALID_ROOM_COMMAND',
+        'Room command payload is invalid.',
+      );
+      return;
+    }
+
+    const payload = parsed.payload as RoomReadyCommandPayload;
+
+    if (typeof payload.isReady !== 'boolean') {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'INVALID_ROOM_COMMAND',
+        'Room ready state is required.',
+      );
+      return;
+    }
+
+    try {
+      const room = this.roomsService.changeReady(
+        parsed.gameId,
+        user.id,
+        payload.isReady,
+      );
+
+      await this.gameEventRecorder.recordEvent({
+        gameId: parsed.gameId,
+        type: 'PlayerReadyChanged',
+        turn: 0,
+        phase: 'WAITING',
+        actorUserId: user.id,
+        payload: {
+          userId: user.id,
+          isReady: payload.isReady,
+        },
+        visibilityDuringGame: EventVisibility.PUBLIC,
+        visibilityAfterGame: EventVisibility.PUBLIC,
+        requestId: parsed.requestId,
+      });
+
+      this.server.to(parsed.gameId).emit('room:updated', {
+        room,
+      });
+      this.emitAccepted(client, parsed.requestId, parsed.type);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Room ready change failed.';
+      const reason =
+        message === 'room not found'
+          ? 'ROOM_NOT_FOUND'
+          : message === 'room is not joinable'
+            ? 'ROOM_NOT_JOINABLE'
+            : message === 'participant not found'
+              ? 'PARTICIPANT_NOT_FOUND'
               : 'ROOM_COMMAND_FAILED';
 
       this.emitRoomRejected(client, parsed.requestId, reason, message);

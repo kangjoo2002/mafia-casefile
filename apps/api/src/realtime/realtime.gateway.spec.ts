@@ -394,7 +394,11 @@ test('room join and leave broadcast participant updates and record events', asyn
     room: {
       roomId: string;
       playerCount: number;
-      participants: Array<{ userId: string; nickname: string }>;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
     };
   }>(hostSocket, 'room:updated');
 
@@ -424,22 +428,33 @@ test('room join and leave broadcast participant updates and record events', asyn
   assert.equal(hostRoomUpdatedMessage.room.roomId, room.roomId);
   assert.equal(hostRoomUpdatedMessage.room.playerCount, 1);
   assert.deepEqual(
-    hostRoomUpdatedMessage.room.participants.map((participant) => participant.nickname),
-    ['alpha'],
+    hostRoomUpdatedMessage.room.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [{ nickname: 'alpha', isReady: false }],
   );
 
   const hostSeesGuestJoin = waitForEvent<{
     room: {
       roomId: string;
       playerCount: number;
-      participants: Array<{ userId: string; nickname: string }>;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
     };
   }>(hostSocket, 'room:updated');
   const guestSeesGuestJoin = waitForEvent<{
     room: {
       roomId: string;
       playerCount: number;
-      participants: Array<{ userId: string; nickname: string }>;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
     };
   }>(guestSocket, 'room:updated');
 
@@ -471,15 +486,167 @@ test('room join and leave broadcast participant updates and record events', asyn
   assert.equal(hostGuestJoinUpdate.room.playerCount, 2);
   assert.equal(guestGuestJoinUpdate.room.playerCount, 2);
   assert.deepEqual(
-    guestGuestJoinUpdate.room.participants.map((participant) => participant.nickname),
-    ['alpha', 'bravo'],
+    guestGuestJoinUpdate.room.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [
+      { nickname: 'alpha', isReady: false },
+      { nickname: 'bravo', isReady: false },
+    ],
+  );
+
+  const hostSeesReadyTrue = waitForEvent<{
+    room: {
+      roomId: string;
+      playerCount: number;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
+    };
+  }>(hostSocket, 'room:updated');
+  const guestSeesReadyTrue = waitForEvent<{
+    room: {
+      roomId: string;
+      playerCount: number;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
+    };
+  }>(guestSocket, 'room:updated');
+
+  const readyTrueResponse = sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(hostSocket, {
+    type: 'CHANGE_READY',
+    requestId: 'req-room-ready-1',
+    gameId: room.roomId,
+    payload: {
+      isReady: true,
+    },
+  });
+
+  const [readyTrueResponseMessage, hostReadyTrueUpdate, guestReadyTrueUpdate] =
+    await Promise.all([
+      readyTrueResponse,
+      hostSeesReadyTrue,
+      guestSeesReadyTrue,
+    ]);
+
+  assert.equal(readyTrueResponseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(readyTrueResponseMessage.requestId, 'req-room-ready-1');
+  assert.equal(readyTrueResponseMessage.receivedType, 'CHANGE_READY');
+  assert.equal(hostReadyTrueUpdate.room.playerCount, 2);
+  assert.deepEqual(
+    hostReadyTrueUpdate.room.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [
+      { nickname: 'alpha', isReady: true },
+      { nickname: 'bravo', isReady: false },
+    ],
+  );
+  assert.deepEqual(
+    guestReadyTrueUpdate.room.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [
+      { nickname: 'alpha', isReady: true },
+      { nickname: 'bravo', isReady: false },
+    ],
+  );
+
+  const hostSeesReadyFalse = waitForEvent<{
+    room: {
+      roomId: string;
+      playerCount: number;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
+    };
+  }>(hostSocket, 'room:updated');
+  const guestSeesReadyFalse = waitForEvent<{
+    room: {
+      roomId: string;
+      playerCount: number;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
+    };
+  }>(guestSocket, 'room:updated');
+
+  const readyFalseResponse = sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(hostSocket, {
+    type: 'CHANGE_READY',
+    requestId: 'req-room-ready-2',
+    gameId: room.roomId,
+    payload: {
+      isReady: false,
+    },
+  });
+
+  const [
+    readyFalseResponseMessage,
+    hostReadyFalseUpdate,
+    guestReadyFalseUpdate,
+  ] = await Promise.all([
+    readyFalseResponse,
+    hostSeesReadyFalse,
+    guestSeesReadyFalse,
+  ]);
+
+  assert.equal(readyFalseResponseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(readyFalseResponseMessage.requestId, 'req-room-ready-2');
+  assert.equal(readyFalseResponseMessage.receivedType, 'CHANGE_READY');
+  assert.deepEqual(
+    hostReadyFalseUpdate.room.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [
+      { nickname: 'alpha', isReady: false },
+      { nickname: 'bravo', isReady: false },
+    ],
+  );
+  assert.deepEqual(
+    guestReadyFalseUpdate.room.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [
+      { nickname: 'alpha', isReady: false },
+      { nickname: 'bravo', isReady: false },
+    ],
   );
 
   const hostSeesGuestLeave = waitForEvent<{
     room: {
       roomId: string;
       playerCount: number;
-      participants: Array<{ userId: string; nickname: string }>;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
     };
   }>(hostSocket, 'room:updated');
 
@@ -506,16 +673,22 @@ test('room join and leave broadcast participant updates and record events', asyn
   assert.equal(leaveResponseMessage.receivedType, 'LEAVE_ROOM');
   assert.equal(hostGuestLeaveUpdate.room.playerCount, 1);
   assert.deepEqual(
-    hostGuestLeaveUpdate.room.participants.map((participant) => participant.nickname),
-    ['alpha'],
+    hostGuestLeaveUpdate.room.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [{ nickname: 'alpha', isReady: false }],
   );
 
   const storedRoom = roomsService.findRoomById(room.roomId);
   assert.ok(storedRoom);
   assert.equal(storedRoom?.playerCount, 1);
   assert.deepEqual(
-    storedRoom?.participants.map((participant) => participant.nickname),
-    ['alpha'],
+    storedRoom?.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [{ nickname: 'alpha', isReady: false }],
   );
 
   const events = await prisma.gameEventLog.findMany({
@@ -529,11 +702,23 @@ test('room join and leave broadcast participant updates and record events', asyn
 
   assert.deepEqual(
     events.map((event) => event.type),
-    ['PlayerJoined', 'PlayerJoined', 'PlayerLeft'],
+    [
+      'PlayerJoined',
+      'PlayerJoined',
+      'PlayerReadyChanged',
+      'PlayerReadyChanged',
+      'PlayerLeft',
+    ],
   );
   assert.deepEqual(
     events.map((event) => event.requestId),
-    ['req-room-join-1', 'req-room-join-2', 'req-room-leave-1'],
+    [
+      'req-room-join-1',
+      'req-room-join-2',
+      'req-room-ready-1',
+      'req-room-ready-2',
+      'req-room-leave-1',
+    ],
   );
 
   await prisma.gameEventLog
