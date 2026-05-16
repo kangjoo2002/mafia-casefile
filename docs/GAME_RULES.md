@@ -13,6 +13,14 @@
 - 따라서 첫 `NIGHT`는 `turn = 0`으로 시작하고, 첫 `DAY_DISCUSSION`은 `turn = 1`이 된다.
 - 이후 `RESULT -> NIGHT` 전환에서는 `turn`을 유지하고, 다음 `NIGHT -> DAY_DISCUSSION`에서 다시 증가한다.
 
+## 밤 액션
+
+- `SELECT_MAFIA_TARGET`, `SELECT_DOCTOR_TARGET`, `SELECT_POLICE_TARGET`는 `NIGHT` phase에서만 허용된다.
+- `SELECT_MAFIA_TARGET`는 살아있는 마피아만 사용할 수 있다.
+- `SELECT_DOCTOR_TARGET`는 살아있는 의사만 사용할 수 있다.
+- `SELECT_POLICE_TARGET`는 살아있는 경찰만 사용할 수 있다.
+- 밤 액션 결과는 `GameSession.nightActions`에 반영되고, `GameEventLog`에도 기록된다.
+
 ## 검증 원칙
 
 - `NEXT_PHASE`는 현재 game session의 phase에 따라만 허용된다.
