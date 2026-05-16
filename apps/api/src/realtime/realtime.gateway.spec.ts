@@ -1514,6 +1514,41 @@ test('night actions require the right role and record selections', async () => {
   assert.equal(phaseResponse.type, 'COMMAND_ACCEPTED');
   assert.equal(phaseResponse.receivedType, 'NEXT_PHASE');
 
+  const nightResolvedSession = await gameSessionService.findByGameId(
+    room.roomId,
+  );
+  assert.ok(nightResolvedSession);
+  assert.equal(nightResolvedSession?.phase, 'DAY_DISCUSSION');
+  assert.equal(
+    nightResolvedSession?.players.find(
+      (player) => player.userId === doctorPlayer.userId,
+    )?.status,
+    'DEAD',
+  );
+
+  const killedEvents = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: 'PlayerKilled',
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.equal(killedEvents.length, 1);
+  assert.equal(killedEvents[0]?.requestId, 'req-night-next-1');
+  assert.equal(
+    (killedEvents[0]?.payload as { targetUserId?: string; cause?: string })
+      ?.targetUserId,
+    doctorPlayer.userId,
+  );
+  assert.equal(
+    (killedEvents[0]?.payload as { targetUserId?: string; cause?: string })
+      ?.cause,
+    'MAFIA_ATTACK',
+  );
+
   const notNightResponse = await nightActionCommand(
     mafiaSocket,
     'SELECT_MAFIA_TARGET',
@@ -1577,23 +1612,44 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   assert.ok(votingSession);
   assert.equal(votingSession?.phase, 'VOTING');
 
-  const voteTargetUserId = 'vote-room-guest-1';
+  const mafiaPlayer = votingSession?.players.find(
+    (player) => player.role === 'MAFIA',
+  );
+  assert.ok(mafiaPlayer);
+
+  const nonMafiaPlayers =
+    votingSession?.players.filter((player) => player.role !== 'MAFIA') ?? [];
+  assert.equal(nonMafiaPlayers.length, 3);
+
+  const voteTargetUserId = mafiaPlayer.userId;
+  const voterSockets = nonMafiaPlayers.map((player) => ({
+    socket:
+      player.userId === 'vote-room-host'
+        ? host.socket
+        : player.userId === 'vote-room-guest-1'
+          ? guest1.socket
+          : player.userId === 'vote-room-guest-2'
+            ? guest2.socket
+            : guest3.socket,
+    userId: player.userId,
+  }));
+
   const firstVote = await voteCommand(
-    host.socket,
+    voterSockets[0]!.socket,
     room.roomId,
     voteTargetUserId,
     'req-vote-1',
   );
   const secondVote = await voteCommand(
-    guest2.socket,
+    voterSockets[1]!.socket,
     room.roomId,
     voteTargetUserId,
     'req-vote-2',
   );
   const thirdVote = await voteCommand(
-    guest3.socket,
+    voterSockets[2]!.socket,
     room.roomId,
-    'vote-room-host',
+    voteTargetUserId,
     'req-vote-3',
   );
 
@@ -1602,7 +1658,7 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   assert.equal(thirdVote.type, 'COMMAND_ACCEPTED');
 
   const duplicateRequestVote = await voteCommand(
-    host.socket,
+    voterSockets[0]!.socket,
     room.roomId,
     voteTargetUserId,
     'req-vote-1',
@@ -1612,7 +1668,7 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   assert.equal(duplicateRequestVote.requestId, 'req-vote-1');
 
   const repeatedVote = await voteCommand(
-    host.socket,
+    voterSockets[0]!.socket,
     room.roomId,
     voteTargetUserId,
     'req-vote-4',
@@ -1625,16 +1681,15 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   const storedSession = await gameSessionService.findByGameId(room.roomId);
   assert.ok(storedSession);
   assert.deepEqual(storedSession?.votes, {
-    'vote-room-host': voteTargetUserId,
-    'vote-room-guest-2': voteTargetUserId,
-    'vote-room-guest-3': 'vote-room-host',
+    [voterSockets[0]!.userId]: voteTargetUserId,
+    [voterSockets[1]!.userId]: voteTargetUserId,
+    [voterSockets[2]!.userId]: voteTargetUserId,
   });
   assert.equal(storedSession?.processedRequests['req-vote-1'], voteTargetUserId);
 
   const tally = gameSessionService.calculateVoteTally(storedSession!);
   assert.deepEqual(tally, [
-    { targetUserId: voteTargetUserId, count: 2 },
-    { targetUserId: 'vote-room-host', count: 1 },
+    { targetUserId: voteTargetUserId, count: 3 },
   ]);
 
   const voteEvents = await prisma.gameEventLog.findMany({
@@ -1654,7 +1709,51 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   );
   assert.deepEqual(
     voteEvents.map((event) => event.actorUserId),
-    ['vote-room-host', 'vote-room-guest-2', 'vote-room-guest-3'],
+    voterSockets.map((entry) => entry.userId),
+  );
+
+  const phaseResolution = await nextPhaseCommand(
+    host.socket,
+    room.roomId,
+    'req-vote-next-1',
+  );
+
+  assert.equal(phaseResolution.type, 'COMMAND_ACCEPTED');
+  assert.equal(phaseResolution.receivedType, 'NEXT_PHASE');
+
+  const resolvedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(resolvedSession);
+  assert.equal(resolvedSession?.phase, 'FINISHED');
+  assert.equal(
+    resolvedSession?.players.find(
+      (player) => player.userId === voteTargetUserId,
+    )?.status,
+    'DEAD',
+  );
+
+  const executedEvents = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: {
+        in: ['PlayerExecuted', 'GameFinished'],
+      },
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.deepEqual(
+    executedEvents.map((event) => event.type),
+    ['PlayerExecuted', 'GameFinished'],
+  );
+  assert.equal(
+    (executedEvents[0]?.payload as { targetUserId?: string })?.targetUserId,
+    voteTargetUserId,
+  );
+  assert.equal(
+    (executedEvents[1]?.payload as { winnerTeam?: string })?.winnerTeam,
+    'CITIZEN',
   );
 
   await prisma.gameEventLog.deleteMany({
