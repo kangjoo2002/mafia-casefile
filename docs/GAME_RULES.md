@@ -27,6 +27,8 @@
 - `SEND_CHAT_MESSAGE`의 `DAY` 채널은 `DAY_DISCUSSION` phase의 살아 있는 player만 사용할 수 있다.
 - `SEND_CHAT_MESSAGE`의 `MAFIA` 채널은 `NIGHT` phase의 살아 있는 마피아만 사용할 수 있다.
 - `SEND_CHAT_MESSAGE`의 `GHOST` 채널은 죽은 player만 사용할 수 있다.
+- `LOBBY` / `DAY`는 room 전체 broadcast다.
+- `MAFIA` / `GHOST`는 권한 있는 대상에게만 private delivery다.
 - 죽은 player는 `DAY` 채팅을 보낼 수 없다.
 - `SYSTEM` 채팅은 서버 발행용 구조만 정의되어 있고, client command는 아직 미지원이다.
 - `END` 채팅은 아직 미지원이다.

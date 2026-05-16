@@ -66,7 +66,7 @@
 | GameStarted | 게임 시작이 확정될 때 | system | gameId, startedByUserId | PUBLIC | PUBLIC | 초기 상태 전환 기준 |
 | RoleAssigned | 역할 배정이 확정될 때 | system | userId, role | PRIVATE | PUBLIC | 각 사용자에게 개인 전달 |
 | PhaseChanged | phase 전환이 확정될 때 | system | fromPhase, toPhase, turn | PUBLIC | PUBLIC | 타임라인 기준 이벤트 |
-| ChatMessageSent | 로비, 낮, 마피아, 유령 채팅이 확정될 때 | user | channel, message, senderUserId | PUBLIC / MAFIA_ONLY / GHOST_ONLY | PUBLIC | 현재는 LOBBY, DAY, MAFIA, GHOST 채팅 command가 구현되어 있고, SYSTEM command는 아직 미지원이다 |
+| ChatMessageSent | 로비, 낮, 마피아, 유령 채팅이 확정될 때 | user | channel, message, senderUserId | PUBLIC / MAFIA_ONLY / GHOST_ONLY | PUBLIC | 현재는 LOBBY, DAY, MAFIA, GHOST 채팅 command가 구현되어 있다. SYSTEM command는 아직 미지원이다 |
 | VoteCasted | 투표가 확정될 때 | user | targetUserId, voteType | PUBLIC | PUBLIC | 현재 표 상태의 근거 |
 | PlayerExecuted | 처형이 확정될 때 | system | targetUserId, voteResult | PUBLIC | PUBLIC | 낮 phase 결과 |
 | PlayerKilled | 사망이 확정될 때 | system | targetUserId, cause | PUBLIC | PUBLIC | 밤 phase 결과 |
@@ -104,5 +104,6 @@
 - SEND_SYSTEM_MESSAGE command
 - 채팅 Redis 캐시
 - rate limiting
+- reconnect 복구
 
 기본 timeline 조회 API는 추가되었고, 현재 응답은 `visibilityAfterGame = PUBLIC` 사건만 포함한다. viewer role 기반 세부 공개 범위 필터링은 이후 작업에서 구현한다.
