@@ -75,6 +75,8 @@
 
 특정 게임의 사건 기록을 `seq` 오름차순으로 조회한다. 기본 응답은 `visibilityAfterGame = PUBLIC`인 사건만 포함한다.
 
+웹 복기 페이지는 `/games/:gameId/timeline` 경로에서 이 API를 사용한다.
+
 이벤트가 없으면 `200`과 빈 `events` 배열을 반환한다.
 
 응답 예:
