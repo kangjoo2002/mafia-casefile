@@ -645,6 +645,114 @@ export class RealtimeGateway
         parsed.gameId,
       );
 
+      let resolutionEvent: {
+        type: string;
+        payload: Record<string, unknown>;
+        visibilityDuringGame: EventVisibility;
+      } | null = null;
+      let gameFinishedPayload:
+        | {
+            winnerTeam: 'MAFIA' | 'CITIZEN';
+            reason: string;
+          }
+        | null = null;
+
+      if (
+        transition.fromPhase === 'NIGHT' &&
+        transition.toPhase === 'DAY_DISCUSSION'
+      ) {
+        const outcome = await this.gameSessionService.resolveNightOutcome(
+          parsed.gameId,
+        );
+
+        if (outcome.killed) {
+          resolutionEvent = {
+            type: 'PlayerKilled',
+            payload: {
+              targetUserId: outcome.killed.userId,
+              cause: 'MAFIA_ATTACK',
+              protectedByDoctor:
+                outcome.protectedTarget?.userId === outcome.killed.userId,
+            },
+            visibilityDuringGame: EventVisibility.PUBLIC,
+          };
+        }
+
+        if (outcome.winnerTeam) {
+          await this.gameSessionService.finishGame(parsed.gameId);
+          gameFinishedPayload = {
+            winnerTeam: outcome.winnerTeam,
+            reason:
+              outcome.winnerTeam === 'CITIZEN'
+                ? 'MAFIA_ELIMINATED'
+                : 'MAFIA_PARITY_REACHED',
+          };
+        }
+      }
+
+      if (
+        transition.fromPhase === 'VOTING' &&
+        transition.toPhase === 'RESULT'
+      ) {
+        const outcome = await this.gameSessionService.resolveVotingOutcome(
+          parsed.gameId,
+        );
+
+        if (outcome.executed) {
+          resolutionEvent = {
+            type: 'PlayerExecuted',
+            payload: {
+              targetUserId: outcome.executed.userId,
+              voteResult: outcome.tally,
+            },
+            visibilityDuringGame: EventVisibility.PUBLIC,
+          };
+        }
+
+        if (outcome.winnerTeam) {
+          await this.gameSessionService.finishGame(parsed.gameId);
+          gameFinishedPayload = {
+            winnerTeam: outcome.winnerTeam,
+            reason:
+              outcome.winnerTeam === 'CITIZEN'
+                ? 'MAFIA_ELIMINATED'
+                : 'MAFIA_PARITY_REACHED',
+          };
+        }
+      }
+
+      if (resolutionEvent) {
+        await this.gameEventRecorder.recordEvent({
+          gameId: parsed.gameId,
+          type: resolutionEvent.type,
+          turn: transition.toTurn,
+          phase: transition.toPhase,
+          actorUserId: null,
+          payload: resolutionEvent.payload,
+          visibilityDuringGame: resolutionEvent.visibilityDuringGame,
+          visibilityAfterGame: EventVisibility.PUBLIC,
+          requestId: parsed.requestId,
+        });
+      }
+
+      if (gameFinishedPayload) {
+        const finishedSession = await this.gameSessionService.findByGameId(
+          parsed.gameId,
+        );
+
+        await this.gameEventRecorder.recordEvent({
+          gameId: parsed.gameId,
+          type: 'GameFinished',
+          turn: finishedSession?.turn ?? transition.toTurn,
+          phase: finishedSession?.phase ?? transition.toPhase,
+          actorUserId: null,
+          payload: gameFinishedPayload,
+          visibilityDuringGame: EventVisibility.PUBLIC,
+          visibilityAfterGame: EventVisibility.PUBLIC,
+          requestId: parsed.requestId,
+        });
+      }
+
       await this.gameEventRecorder.recordEvent({
         gameId: parsed.gameId,
         type: 'PhaseChanged',

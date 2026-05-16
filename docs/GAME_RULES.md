@@ -29,6 +29,15 @@
 - 같은 `requestId`의 재전송은 1차 중복 차단 대상으로 처리된다.
 - 투표 결과는 `GameSession.votes`와 `GameEventLog`의 `VoteCasted` 사건으로 추적한다.
 
+## 처형과 종료
+
+- `NEXT_PHASE`로 `VOTING -> RESULT`를 진행하면 현재 투표 결과를 기준으로 처형이 해소된다.
+- 가장 많은 표를 받은 대상이 처형되며, 동률이거나 표가 없으면 처형은 생략된다.
+- `NEXT_PHASE`로 `NIGHT -> DAY_DISCUSSION`을 진행하면 밤 선택 결과가 해소된다.
+- `PlayerExecuted`, `PlayerKilled`, `GameFinished`는 해소 결과와 종료 조건에 따라 기록된다.
+- 마피아가 모두 탈락하면 시민 승리, 마피아 수가 생존한 비마피아 수 이상이면 마피아 승리다.
+- `FINISHED` phase는 종료 상태이며, 더 이상 게임 액션을 받을 수 없다.
+
 ## 검증 원칙
 
 - `NEXT_PHASE`는 현재 game session의 phase에 따라만 허용된다.

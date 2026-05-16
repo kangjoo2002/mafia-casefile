@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type {
   ConnectionStatus,
-  GamePhase,
   PlayerStatus,
   Role,
 } from '@mafia-casefile/shared';
@@ -43,6 +42,22 @@ export interface VoteCastResult {
   target: GameSessionPlayer;
   tally: VoteTallyEntry[];
   duplicateRequest: boolean;
+}
+
+export type WinnerTeam = 'MAFIA' | 'CITIZEN';
+
+export interface NightOutcomeResult {
+  session: GameSession;
+  killed: GameSessionPlayer | null;
+  protectedTarget: GameSessionPlayer | null;
+  winnerTeam: WinnerTeam | null;
+}
+
+export interface VotingOutcomeResult {
+  session: GameSession;
+  executed: GameSessionPlayer | null;
+  tally: VoteTallyEntry[];
+  winnerTeam: WinnerTeam | null;
 }
 
 @Injectable()
@@ -270,6 +285,95 @@ export class GameSessionService {
       });
   }
 
+  async resolveNightOutcome(gameId: string): Promise<NightOutcomeResult> {
+    const session = await this.findByGameId(gameId);
+
+    if (!session) {
+      throw new Error('game session not found');
+    }
+
+    const protectedTarget = this.findPlayer(
+      session,
+      session.nightActions.doctorTarget ?? null,
+    );
+    const targetUserId =
+      session.nightActions.mafiaTarget &&
+      session.nightActions.mafiaTarget !== session.nightActions.doctorTarget
+        ? session.nightActions.mafiaTarget
+        : null;
+
+    if (!targetUserId) {
+      const clearedSession = this.clearNightActions(session);
+      const saved = await this.repository.save(clearedSession);
+
+      return {
+        session: saved,
+        killed: null,
+        protectedTarget,
+        winnerTeam: this.evaluateWinner(saved),
+      };
+    }
+
+    const target = this.findPlayer(session, targetUserId);
+
+    if (!target) {
+      throw new Error('target player not found');
+    }
+
+    const updatedSession = this.applyPlayerDeath(session, targetUserId, {
+      nightActions: {},
+    });
+    const saved = await this.repository.save(updatedSession);
+
+    return {
+      session: saved,
+      killed: structuredClone(target),
+      protectedTarget,
+      winnerTeam: this.evaluateWinner(saved),
+    };
+  }
+
+  async resolveVotingOutcome(gameId: string): Promise<VotingOutcomeResult> {
+    const session = await this.findByGameId(gameId);
+
+    if (!session) {
+      throw new Error('game session not found');
+    }
+
+    const tally = this.calculateVoteTally(session);
+    const executedTargetId = this.selectVoteWinner(tally);
+
+    if (!executedTargetId) {
+      const clearedSession = this.clearVotes(session);
+      const saved = await this.repository.save(clearedSession);
+
+      return {
+        session: saved,
+        executed: null,
+        tally,
+        winnerTeam: this.evaluateWinner(saved),
+      };
+    }
+
+    const target = this.findPlayer(session, executedTargetId);
+
+    if (!target) {
+      throw new Error('target player not found');
+    }
+
+    const updatedSession = this.applyPlayerDeath(session, executedTargetId, {
+      votes: {},
+    });
+    const saved = await this.repository.save(updatedSession);
+
+    return {
+      session: saved,
+      executed: structuredClone(target),
+      tally,
+      winnerTeam: this.evaluateWinner(saved),
+    };
+  }
+
   private createGameSessionPlayer(
     player: StartGameSessionPlayerInput,
     startedAt: Date,
@@ -282,6 +386,96 @@ export class GameSessionService {
       connectionStatus: 'CONNECTED' satisfies ConnectionStatus,
       lastSeenAt: startedAt,
     };
+  }
+
+  private findPlayer(
+    session: GameSession,
+    userId: string | null,
+  ): GameSessionPlayer | null {
+    if (!userId) {
+      return null;
+    }
+
+    const player = session.players.find(
+      (current) => current.userId === userId,
+    );
+
+    return player ? structuredClone(player) : null;
+  }
+
+  private clearVotes(session: GameSession): GameSession {
+    return {
+      ...structuredClone(session),
+      votes: {},
+      version: session.version + 1,
+      updatedAt: new Date(),
+    };
+  }
+
+  private clearNightActions(session: GameSession): GameSession {
+    return {
+      ...structuredClone(session),
+      nightActions: {},
+      version: session.version + 1,
+      updatedAt: new Date(),
+    };
+  }
+
+  private applyPlayerDeath(
+    session: GameSession,
+    targetUserId: string,
+    patch: Partial<Pick<GameSession, 'votes' | 'nightActions'>>,
+  ): GameSession {
+    return {
+      ...structuredClone(session),
+      players: session.players.map((player) =>
+        player.userId === targetUserId
+          ? {
+              ...player,
+              status: 'DEAD' satisfies PlayerStatus,
+              lastSeenAt: new Date(),
+            }
+          : player,
+      ),
+      votes: patch.votes ?? session.votes,
+      nightActions: patch.nightActions ?? session.nightActions,
+      version: session.version + 1,
+      updatedAt: new Date(),
+    };
+  }
+
+  private selectVoteWinner(tally: VoteTallyEntry[]): string | null {
+    const first = tally[0];
+
+    if (!first) {
+      return null;
+    }
+
+    const second = tally[1];
+    if (second && second.count === first.count) {
+      return null;
+    }
+
+    return first.targetUserId;
+  }
+
+  private evaluateWinner(session: GameSession): WinnerTeam | null {
+    const mafiaAlive = session.players.filter(
+      (player) => player.status === 'ALIVE' && player.role === 'MAFIA',
+    ).length;
+    const nonMafiaAlive = session.players.filter(
+      (player) => player.status === 'ALIVE' && player.role !== 'MAFIA',
+    ).length;
+
+    if (mafiaAlive === 0) {
+      return 'CITIZEN';
+    }
+
+    if (mafiaAlive >= nonMafiaAlive) {
+      return 'MAFIA';
+    }
+
+    return null;
   }
 
   private async selectNightAction(
