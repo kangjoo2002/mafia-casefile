@@ -17,6 +17,7 @@
 
 - `game_event_logs`는 게임 중 의미 있는 행동이 확정되었을 때 남기는 영구 사건 기록이다.
 - Redis나 Socket.IO 이벤트가 아니라 PostgreSQL에 저장되는 타임라인 기준 데이터다.
+- GameEventLog 저장은 `GameEventRecorderService`를 통해 수행된다.
 - `gameId + seq`가 사건 정렬과 중복 방지의 기준이다.
 
 필드:
