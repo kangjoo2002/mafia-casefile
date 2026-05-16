@@ -31,6 +31,8 @@ type RoomReadyCommandPayload = {
   isReady?: unknown;
 };
 
+type RoomStartCommandPayload = Record<string, never>;
+
 type RoomUpdatedEvent = {
   room: Room;
 };
@@ -138,6 +140,11 @@ export class RealtimeGateway
 
     if (parsed.type === 'CHANGE_READY') {
       await this.handleChangeReady(parsed, client);
+      return;
+    }
+
+    if (parsed.type === 'START_GAME') {
+      await this.handleStartGame(parsed, client);
       return;
     }
 
@@ -350,6 +357,67 @@ export class RealtimeGateway
             : message === 'participant not found'
               ? 'PARTICIPANT_NOT_FOUND'
               : 'ROOM_COMMAND_FAILED';
+
+      this.emitRoomRejected(client, parsed.requestId, reason, message);
+    }
+  }
+
+  private async handleStartGame(
+    parsed: RoomCommandEnvelope,
+    client: Socket,
+  ) {
+    const authedClient = client as AuthenticatedSocket;
+    const user = authedClient.data.user;
+
+    if (!user) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'UNAUTHORIZED',
+        'Socket user is missing.',
+      );
+      return;
+    }
+
+    if (
+      typeof parsed.payload !== 'object' ||
+      parsed.payload === null ||
+      Array.isArray(parsed.payload)
+    ) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'INVALID_ROOM_COMMAND',
+        'Room command payload is invalid.',
+      );
+      return;
+    }
+
+    const payload = parsed.payload as RoomStartCommandPayload;
+    void payload;
+
+    try {
+      const room = this.roomsService.startGame(parsed.gameId, user.id);
+
+      this.server.to(parsed.gameId).emit('room:updated', {
+        room,
+      });
+      this.emitAccepted(client, parsed.requestId, parsed.type);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Room start failed.';
+      const reason =
+        message === 'room not found'
+          ? 'ROOM_NOT_FOUND'
+          : message === 'only host can start game'
+            ? 'NOT_ROOM_HOST'
+            : message === 'room needs at least 4 players'
+              ? 'ROOM_TOO_SMALL'
+              : message === 'not all participants are ready'
+                ? 'ROOM_NOT_READY'
+                : message === 'room is not startable'
+                  ? 'ROOM_NOT_STARTABLE'
+                  : 'ROOM_COMMAND_FAILED';
 
       this.emitRoomRejected(client, parsed.requestId, reason, message);
     }

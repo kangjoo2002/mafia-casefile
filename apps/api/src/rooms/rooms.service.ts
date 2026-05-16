@@ -162,6 +162,44 @@ export class RoomsService {
     return cloneRoom(snapshot);
   }
 
+  startGame(roomId: string, userId: string): Room {
+    if (!isNonEmptyString(roomId)) {
+      throw new BadRequestException('roomId is required');
+    }
+
+    if (!isNonEmptyString(userId)) {
+      throw new BadRequestException('userId is required');
+    }
+
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      throw new BadRequestException('room not found');
+    }
+
+    if (room.status !== 'WAITING') {
+      throw new BadRequestException('room is not startable');
+    }
+
+    if (room.hostUserId !== userId.trim()) {
+      throw new BadRequestException('only host can start game');
+    }
+
+    if (room.participants.length < 4) {
+      throw new BadRequestException('room needs at least 4 players');
+    }
+
+    if (room.participants.some((participant) => !participant.isReady)) {
+      throw new BadRequestException('not all participants are ready');
+    }
+
+    room.status = 'IN_PROGRESS';
+    room.updatedAt = new Date();
+
+    const snapshot = normalizeRoom(room);
+    this.rooms.set(roomId, snapshot);
+    return cloneRoom(snapshot);
+  }
+
   changeReady(roomId: string, userId: string, isReady: boolean): Room {
     if (!isNonEmptyString(roomId)) {
       throw new BadRequestException('roomId is required');
