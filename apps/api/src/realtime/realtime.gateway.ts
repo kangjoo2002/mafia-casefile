@@ -9,12 +9,6 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import type {
-  CommandAcceptedEvent,
-  CommandRejectedEvent,
-  PongEvent,
-  WhoamiEvent,
-} from '@mafia-casefile/shared';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '../auth/jwt.service';
 import { GameCommandService } from '../game-commands/game-command.service';
@@ -23,9 +17,16 @@ import type {
   GameCommandEffect,
   GameCommandPrivateEventEffect,
   GameCommandRejectedResult,
+  GameCommandResult,
 } from '../game-commands/game-command.types';
 import { parseCommandEnvelope } from './command-envelope';
 import { AuthenticatedSocket } from './socket-user';
+import type {
+  CommandAcceptedEvent,
+  CommandRejectedEvent,
+  PongEvent,
+  WhoamiEvent,
+} from '@mafia-casefile/shared';
 
 @WebSocketGateway({
   cors: {

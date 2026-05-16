@@ -12,6 +12,7 @@
     "test:auth": "node --import tsx --test src/auth/auth.service.spec.ts",
     "test:game-event": "node --import tsx --test src/game-events/game-event-log.model.spec.ts",
     "test:game-event-recorder": "node --import tsx --test src/game-events/game-event-recorder.service.spec.ts",
+    "test:game-e2e": "node --import tsx --test src/realtime/realtime.game-flow.e2e-spec.ts",
     "test:game-session": "node --import tsx --test src/game-session/game-session.repository.spec.ts",
     "test:redis": "node --import tsx --test src/redis/redis.service.spec.ts",
     "test:socket": "node --import tsx --test src/realtime/realtime.gateway.spec.ts",
