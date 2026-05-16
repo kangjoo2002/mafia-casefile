@@ -200,6 +200,31 @@ export class RoomsService {
     return cloneRoom(snapshot);
   }
 
+  assertCanAdvancePhase(roomId: string, userId: string): Room {
+    if (!isNonEmptyString(roomId)) {
+      throw new BadRequestException('roomId is required');
+    }
+
+    if (!isNonEmptyString(userId)) {
+      throw new BadRequestException('userId is required');
+    }
+
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      throw new BadRequestException('room not found');
+    }
+
+    if (room.hostUserId !== userId.trim()) {
+      throw new BadRequestException('not room host');
+    }
+
+    if (room.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('room is not in progress');
+    }
+
+    return cloneRoom(normalizeRoom(room));
+  }
+
   changeReady(roomId: string, userId: string, isReady: boolean): Room {
     if (!isNonEmptyString(roomId)) {
       throw new BadRequestException('roomId is required');

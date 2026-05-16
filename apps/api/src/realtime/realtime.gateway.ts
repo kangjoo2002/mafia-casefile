@@ -641,6 +641,8 @@ export class RealtimeGateway
     }
 
     try {
+      this.roomsService.assertCanAdvancePhase(parsed.gameId, user.id);
+
       const transition = await this.gameSessionService.advancePhase(
         parsed.gameId,
       );
@@ -786,12 +788,19 @@ export class RealtimeGateway
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Phase transition failed.';
-      const reason =
-        message === 'game session not found'
-          ? 'GAME_SESSION_NOT_FOUND'
-          : message === 'game is finished'
-            ? 'GAME_ALREADY_FINISHED'
-            : 'ROOM_COMMAND_FAILED';
+      let reason = 'ROOM_COMMAND_FAILED';
+
+      if (message === 'game session not found') {
+        reason = 'GAME_SESSION_NOT_FOUND';
+      } else if (message === 'room not found') {
+        reason = 'ROOM_NOT_FOUND';
+      } else if (message === 'not room host') {
+        reason = 'NOT_ROOM_HOST';
+      } else if (message === 'room is not in progress') {
+        reason = 'GAME_NOT_IN_PROGRESS';
+      } else if (message === 'game is finished') {
+        reason = 'GAME_ALREADY_FINISHED';
+      }
 
       this.emitRoomRejected(client, parsed.requestId, reason, message);
     }
@@ -1010,20 +1019,23 @@ export class RealtimeGateway
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Night action failed.';
-      const reason =
-        message === 'game session not found'
-          ? 'GAME_SESSION_NOT_FOUND'
-          : message === 'night actions are only allowed during NIGHT'
-            ? 'GAME_NOT_IN_NIGHT'
-            : message === 'actor not found'
-              ? 'PLAYER_NOT_IN_GAME'
-              : message === 'dead player cannot act'
-                ? 'PLAYER_NOT_ALIVE'
-                : message === 'role not allowed'
-                  ? 'ROLE_NOT_ALLOWED'
-                  : message === 'target player not found'
-                    ? 'TARGET_PLAYER_NOT_FOUND'
-                    : 'ROOM_COMMAND_FAILED';
+      let reason = 'ROOM_COMMAND_FAILED';
+
+      if (message === 'game session not found') {
+        reason = 'GAME_SESSION_NOT_FOUND';
+      } else if (message === 'night actions are only allowed during NIGHT') {
+        reason = 'GAME_NOT_IN_NIGHT';
+      } else if (message === 'actor not found') {
+        reason = 'PLAYER_NOT_IN_GAME';
+      } else if (message === 'dead player cannot act') {
+        reason = 'PLAYER_NOT_ALIVE';
+      } else if (message === 'role not allowed') {
+        reason = 'ROLE_NOT_ALLOWED';
+      } else if (message === 'target player not found') {
+        reason = 'TARGET_PLAYER_NOT_FOUND';
+      } else if (message === 'target player is not alive') {
+        reason = 'TARGET_PLAYER_NOT_ALIVE';
+      }
 
       this.emitRoomRejected(client, parsed.requestId, reason, message);
     }

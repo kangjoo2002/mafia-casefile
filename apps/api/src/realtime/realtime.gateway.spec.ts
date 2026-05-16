@@ -1206,6 +1206,16 @@ test('next phase advances the session and broadcasts phase changes', async () =>
   await readyRoomCommand(guest2.socket, room.roomId, true, 'req-phase-ready-3');
   await readyRoomCommand(guest3.socket, room.roomId, true, 'req-phase-ready-4');
 
+  const waitingPhaseRejected = await nextPhaseCommand(
+    host.socket,
+    room.roomId,
+    'req-phase-next-waiting',
+  );
+
+  assert.equal(waitingPhaseRejected.type, 'COMMAND_REJECTED');
+  assert.equal(waitingPhaseRejected.reason, 'GAME_NOT_IN_PROGRESS');
+  assert.equal(waitingPhaseRejected.message, 'room is not in progress');
+
   const startResponse = await startGameCommand(
     host.socket,
     room.roomId,
@@ -1214,6 +1224,16 @@ test('next phase advances the session and broadcasts phase changes', async () =>
 
   assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
   assert.equal(startResponse.receivedType, 'START_GAME');
+
+  const guestPhaseRejected = await nextPhaseCommand(
+    guest1.socket,
+    room.roomId,
+    'req-phase-next-nonhost',
+  );
+
+  assert.equal(guestPhaseRejected.type, 'COMMAND_REJECTED');
+  assert.equal(guestPhaseRejected.reason, 'NOT_ROOM_HOST');
+  assert.equal(guestPhaseRejected.message, 'not room host');
 
   const startedSession = await gameSessionService.findByGameId(room.roomId);
   assert.ok(startedSession);
@@ -1420,7 +1440,7 @@ test('night actions require the right role and record selections', async () => {
     mafiaSocket,
     'SELECT_MAFIA_TARGET',
     room.roomId,
-    doctorPlayer.userId,
+    citizenPlayer.userId,
     'req-night-mafia-1',
   );
   const doctorTargetResponse = await nightActionCommand(
@@ -1446,7 +1466,7 @@ test('night actions require the right role and record selections', async () => {
   assert.ok(sessionAfterActions);
   assert.equal(
     sessionAfterActions?.nightActions.mafiaTarget,
-    doctorPlayer.userId,
+    citizenPlayer.userId,
   );
   assert.equal(
     sessionAfterActions?.nightActions.doctorTarget,
@@ -1488,7 +1508,7 @@ test('night actions require the right role and record selections', async () => {
   assert.equal(
     (nightEvents[0]?.payload as { targetUserId?: string } | undefined)
       ?.targetUserId,
-    doctorPlayer.userId,
+    citizenPlayer.userId,
   );
   assert.equal(
     (nightEvents[1]?.payload as { targetUserId?: string } | undefined)
@@ -1521,7 +1541,7 @@ test('night actions require the right role and record selections', async () => {
   assert.equal(nightResolvedSession?.phase, 'DAY_DISCUSSION');
   assert.equal(
     nightResolvedSession?.players.find(
-      (player) => player.userId === doctorPlayer.userId,
+      (player) => player.userId === citizenPlayer.userId,
     )?.status,
     'DEAD',
   );
@@ -1541,7 +1561,7 @@ test('night actions require the right role and record selections', async () => {
   assert.equal(
     (killedEvents[0]?.payload as { targetUserId?: string; cause?: string })
       ?.targetUserId,
-    doctorPlayer.userId,
+    citizenPlayer.userId,
   );
   assert.equal(
     (killedEvents[0]?.payload as { targetUserId?: string; cause?: string })
@@ -1560,6 +1580,45 @@ test('night actions require the right role and record selections', async () => {
   assert.equal(notNightResponse.type, 'COMMAND_REJECTED');
   assert.equal(notNightResponse.reason, 'GAME_NOT_IN_NIGHT');
   assert.equal(notNightResponse.message, 'night actions are only allowed during NIGHT');
+
+  await nextPhaseCommand(host.socket, room.roomId, 'req-night-recover-1');
+  await nextPhaseCommand(host.socket, room.roomId, 'req-night-recover-2');
+  await nextPhaseCommand(host.socket, room.roomId, 'req-night-recover-3');
+
+  const nightAgainSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(nightAgainSession);
+  assert.equal(nightAgainSession?.phase, 'NIGHT');
+
+  const deadTargetUserId = citizenPlayer.userId;
+  const deadTargetResponses = await Promise.all([
+    nightActionCommand(
+      mafiaSocket,
+      'SELECT_MAFIA_TARGET',
+      room.roomId,
+      deadTargetUserId,
+      'req-night-dead-mafia',
+    ),
+    nightActionCommand(
+      doctorSocket,
+      'SELECT_DOCTOR_TARGET',
+      room.roomId,
+      deadTargetUserId,
+      'req-night-dead-doctor',
+    ),
+    nightActionCommand(
+      policeSocket,
+      'SELECT_POLICE_TARGET',
+      room.roomId,
+      deadTargetUserId,
+      'req-night-dead-police',
+    ),
+  ]);
+
+  for (const response of deadTargetResponses) {
+    assert.equal(response.type, 'COMMAND_REJECTED');
+    assert.equal(response.reason, 'TARGET_PLAYER_NOT_ALIVE');
+    assert.equal(response.message, 'target player is not alive');
+  }
 
   await prisma.gameEventLog.deleteMany({
     where: {

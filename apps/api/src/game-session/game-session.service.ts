@@ -320,6 +320,10 @@ export class GameSessionService {
       throw new Error('target player not found');
     }
 
+    if (target.status !== 'ALIVE') {
+      throw new Error('target player is not alive');
+    }
+
     const updatedSession = this.applyPlayerDeath(session, targetUserId, {
       nightActions: {},
     });
@@ -517,6 +521,10 @@ export class GameSessionService {
 
     if (!target) {
       throw new Error('target player not found');
+    }
+
+    if (target.status !== 'ALIVE') {
+      throw new Error('target player is not alive');
     }
 
     const updatedSession: GameSession = {
