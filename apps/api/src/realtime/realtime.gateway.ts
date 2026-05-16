@@ -38,6 +38,10 @@ type RoomReadyCommandPayload = {
 
 type RoomStartCommandPayload = Record<string, never>;
 
+type VoteCommandPayload = {
+  targetUserId?: unknown;
+};
+
 type NightTargetCommandPayload = {
   targetUserId?: unknown;
 };
@@ -178,6 +182,11 @@ export class RealtimeGateway
 
     if (parsed.type === 'NEXT_PHASE') {
       await this.handleNextPhase(parsed, client);
+      return;
+    }
+
+    if (parsed.type === 'CAST_VOTE') {
+      await this.handleCastVote(parsed, client);
       return;
     }
 
@@ -675,6 +684,98 @@ export class RealtimeGateway
           : message === 'game is finished'
             ? 'GAME_ALREADY_FINISHED'
             : 'ROOM_COMMAND_FAILED';
+
+      this.emitRoomRejected(client, parsed.requestId, reason, message);
+    }
+  }
+
+  private async handleCastVote(
+    parsed: RoomCommandEnvelope,
+    client: Socket,
+  ) {
+    const authedClient = client as AuthenticatedSocket;
+    const user = authedClient.data.user;
+
+    if (!user) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'UNAUTHORIZED',
+        'Socket user is missing.',
+      );
+      return;
+    }
+
+    if (
+      typeof parsed.payload !== 'object' ||
+      parsed.payload === null ||
+      Array.isArray(parsed.payload)
+    ) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'INVALID_ROOM_COMMAND',
+        'Room command payload is invalid.',
+      );
+      return;
+    }
+
+    const payload = parsed.payload as VoteCommandPayload;
+
+    if (!isNonEmptyString(payload.targetUserId)) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'INVALID_ROOM_COMMAND',
+        'Vote target user is required.',
+      );
+      return;
+    }
+
+    try {
+      const result = await this.gameSessionService.castVote(
+        parsed.gameId,
+        user.id,
+        payload.targetUserId,
+        parsed.requestId,
+      );
+
+      if (!result.duplicateRequest) {
+        await this.gameEventRecorder.recordEvent({
+          gameId: parsed.gameId,
+          type: 'VoteCasted',
+          turn: result.session.turn,
+          phase: result.session.phase,
+          actorUserId: user.id,
+          payload: {
+            targetUserId: result.target.userId,
+          },
+          visibilityDuringGame: EventVisibility.PUBLIC,
+          visibilityAfterGame: EventVisibility.PUBLIC,
+          requestId: parsed.requestId,
+        });
+      }
+
+      this.emitAccepted(client, parsed.requestId, parsed.type);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Vote command failed.';
+      const reason =
+        message === 'game session not found'
+          ? 'GAME_SESSION_NOT_FOUND'
+          : message === 'votes are only allowed during VOTING'
+            ? 'GAME_NOT_IN_VOTING'
+            : message === 'actor not found'
+              ? 'PLAYER_NOT_IN_GAME'
+              : message === 'dead player cannot vote'
+                ? 'PLAYER_NOT_ALIVE'
+                : message === 'target player not found'
+                  ? 'TARGET_PLAYER_NOT_FOUND'
+                  : message === 'target player is not alive'
+                    ? 'TARGET_PLAYER_NOT_ALIVE'
+                    : message === 'vote already cast'
+                      ? 'VOTE_ALREADY_CAST'
+                      : 'ROOM_COMMAND_FAILED';
 
       this.emitRoomRejected(client, parsed.requestId, reason, message);
     }

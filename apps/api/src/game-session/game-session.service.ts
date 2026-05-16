@@ -32,6 +32,19 @@ export interface NightActionSelectionResult {
   target: GameSessionPlayer;
 }
 
+export interface VoteTallyEntry {
+  targetUserId: string;
+  count: number;
+}
+
+export interface VoteCastResult {
+  session: GameSession;
+  actor: GameSessionPlayer;
+  target: GameSessionPlayer;
+  tally: VoteTallyEntry[];
+  duplicateRequest: boolean;
+}
+
 @Injectable()
 export class GameSessionService {
   private readonly stateMachine = new GameStateMachine();
@@ -142,6 +155,119 @@ export class GameSessionService {
       'POLICE',
       'policeTarget',
     );
+  }
+
+  async castVote(
+    gameId: string,
+    actorUserId: string,
+    targetUserId: string,
+    requestId: string,
+  ): Promise<VoteCastResult> {
+    const session = await this.findByGameId(gameId);
+
+    if (!session) {
+      throw new Error('game session not found');
+    }
+
+    if (session.phase !== 'VOTING') {
+      throw new Error('votes are only allowed during VOTING');
+    }
+
+    if (session.processedRequests[requestId]) {
+      const actor = session.players.find(
+        (player) => player.userId === actorUserId,
+      );
+
+      if (!actor) {
+        throw new Error('actor not found');
+      }
+
+      const target = session.players.find(
+        (player) => player.userId === targetUserId,
+      );
+
+      if (!target) {
+        throw new Error('target player not found');
+      }
+
+      return {
+        session,
+        actor: structuredClone(actor),
+        target: structuredClone(target),
+        tally: this.calculateVoteTally(session),
+        duplicateRequest: true,
+      };
+    }
+
+    const actor = session.players.find(
+      (player) => player.userId === actorUserId,
+    );
+
+    if (!actor) {
+      throw new Error('actor not found');
+    }
+
+    if (actor.status !== 'ALIVE') {
+      throw new Error('dead player cannot vote');
+    }
+
+    const target = session.players.find(
+      (player) => player.userId === targetUserId,
+    );
+
+    if (!target) {
+      throw new Error('target player not found');
+    }
+
+    if (target.status !== 'ALIVE') {
+      throw new Error('target player is not alive');
+    }
+
+    if (session.votes[actorUserId]) {
+      throw new Error('vote already cast');
+    }
+
+    const updatedSession: GameSession = {
+      ...structuredClone(session),
+      votes: {
+        ...session.votes,
+        [actorUserId]: targetUserId,
+      },
+      processedRequests: {
+        ...session.processedRequests,
+        [requestId]: targetUserId,
+      },
+      version: session.version + 1,
+      updatedAt: new Date(),
+    };
+
+    const saved = await this.repository.save(updatedSession);
+
+    return {
+      session: saved,
+      actor: structuredClone(actor),
+      target: structuredClone(target),
+      tally: this.calculateVoteTally(saved),
+      duplicateRequest: false,
+    };
+  }
+
+  calculateVoteTally(session: GameSession): VoteTallyEntry[] {
+    const counts = new Map<string, number>();
+
+    for (const targetUserId of Object.values(session.votes)) {
+      counts.set(targetUserId, (counts.get(targetUserId) ?? 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .map(([targetUserId, count]) => ({ targetUserId, count }))
+      .sort((left, right) => {
+        if (right.count !== left.count) {
+          return right.count - left.count;
+        }
+
+        return left.targetUserId.localeCompare(right.targetUserId);
+      });
   }
 
   private createGameSessionPlayer(
