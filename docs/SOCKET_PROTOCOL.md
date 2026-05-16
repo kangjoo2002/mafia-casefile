@@ -18,6 +18,8 @@ io('http://localhost:3001', {
 
 토큰이 없거나 잘못된 경우 연결은 실패한다.
 
+연결이 성립하면 서버는 Redis에 user별 접속 상태를 저장한다. 이 상태는 `userId`, `socketId`, `roomId`, `status`, `connectedAt`, `lastSeenAt`, `disconnectedAt`을 포함하며, `JOIN_ROOM` 후 `roomId`가 갱신되고 `LEAVE_ROOM` 후 `roomId`는 `null`로 정리된다. disconnect 시에는 `DISCONNECTED` 상태가 저장된다. 이 값들은 재접속 복구의 기반이지만, 복구 로직 자체는 아직 구현하지 않는다.
+
 ## ping / pong
 
 클라이언트가 `ping` 이벤트를 보내면 서버는 `pong` 이벤트로 응답한다.

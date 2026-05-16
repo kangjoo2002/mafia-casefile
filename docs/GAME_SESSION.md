@@ -33,3 +33,4 @@ Redis key는 `game-session:{gameId}`다.
 저장값은 JSON이며, Date 필드는 조회 시 다시 `Date` 객체로 복원된다.
 TTL은 `GAME_SESSION_TTL_SECONDS`를 사용하고 기본값은 86400초다.
 Redis lock, requestId idempotency 강화, 접속 상태 Redis 저장, reconnect 복구는 아직 별도 작업이다.
+접속 상태는 별도로 `connection:user:{userId}` / `connection:socket:{socketId}` key에 저장한다.

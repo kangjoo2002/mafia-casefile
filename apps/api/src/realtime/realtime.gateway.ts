@@ -19,6 +19,7 @@ import type {
   GameCommandRejectedResult,
   GameCommandResult,
 } from '../game-commands/game-command.types';
+import { ConnectionStateService } from './connection-state.service';
 import { parseCommandEnvelope } from './command-envelope';
 import { AuthenticatedSocket } from './socket-user';
 import type {
@@ -46,6 +47,8 @@ export class RealtimeGateway
     @Inject(JwtService) private readonly jwtService: JwtService,
     @Inject(GameCommandService)
     private readonly gameCommandService: GameCommandService,
+    @Inject(ConnectionStateService)
+    private readonly connectionStateService: ConnectionStateService,
   ) {}
 
   afterInit(server: Server) {
@@ -78,6 +81,14 @@ export class RealtimeGateway
 
     if (user) {
       void client.join(`user:${user.id}`);
+      void this.connectionStateService
+        .markConnected({
+          userId: user.id,
+          socketId: client.id,
+        })
+        .catch((error) => {
+          this.warnConnectionStateError('mark connected', user.id, client.id, error);
+        });
     }
 
     this.logger.log(`connected ${user?.id ?? authedClient.id}`);
@@ -85,6 +96,19 @@ export class RealtimeGateway
 
   handleDisconnect(client: Socket) {
     const authedClient = client as AuthenticatedSocket;
+    const user = authedClient.data.user;
+
+    if (user) {
+      void this.connectionStateService
+        .markDisconnected({
+          userId: user.id,
+          socketId: client.id,
+        })
+        .catch((error) => {
+          this.warnConnectionStateError('mark disconnected', user.id, client.id, error);
+        });
+    }
+
     this.logger.log(`disconnected ${authedClient.data.user?.id ?? authedClient.id}`);
   }
 
@@ -125,7 +149,7 @@ export class RealtimeGateway
       return;
     }
 
-    await this.applyCommandEffects(client, result.effects);
+    await this.applyCommandEffects(client, authedClient.data.user ?? null, result.effects);
     this.emitAccepted(client, result.requestId, result.receivedType);
   }
 
@@ -139,16 +163,39 @@ export class RealtimeGateway
 
   private async applyCommandEffects(
     client: Socket,
+    user: { id: string; email: string } | null,
     effects: GameCommandEffect[],
   ) {
     for (const effect of effects) {
       if (effect.kind === 'join') {
         await client.join(effect.roomId);
+        if (user) {
+          await this.persistRoomState('set room', () =>
+            this.connectionStateService.setRoom({
+              userId: user.id,
+              socketId: client.id,
+              roomId: effect.roomId,
+            }),
+            user.id,
+            client.id,
+          );
+        }
         continue;
       }
 
       if (effect.kind === 'leave') {
         await client.leave(effect.roomId);
+        if (user) {
+          await this.persistRoomState('clear room', () =>
+            this.connectionStateService.clearRoom({
+              userId: user.id,
+              socketId: client.id,
+              roomId: effect.roomId,
+            }),
+            user.id,
+            client.id,
+          );
+        }
         continue;
       }
 
@@ -188,5 +235,31 @@ export class RealtimeGateway
     };
 
     client.emit('command:rejected', rejected);
+  }
+
+  private async persistRoomState(
+    action: 'set room' | 'clear room',
+    persist: () => Promise<unknown>,
+    userId: string,
+    socketId: string,
+  ) {
+    try {
+      await persist();
+    } catch (error) {
+      this.warnConnectionStateError(action, userId, socketId, error);
+    }
+  }
+
+  private warnConnectionStateError(
+    action: string,
+    userId: string,
+    socketId: string,
+    error: unknown,
+  ) {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    this.logger.warn(
+      `failed to ${action} for user ${userId} on socket ${socketId}: ${message}`,
+    );
   }
 }
