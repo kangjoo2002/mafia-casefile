@@ -10,7 +10,8 @@
 - `GameEventRecorderService`가 `recordEvent()`로 `GameEventLog`를 저장한다.
 - `gameId`별 `seq`는 `recordEvent()`에서 발급한다.
 - `getTimeline(gameId)`는 `seq` 오름차순으로 사건을 조회한다.
-- visibility 필터링과 timeline API는 아직 구현하지 않는다.
+- `GET /games/:gameId/timeline`은 `GameEventLog`를 `seq` 기준으로 조회한다.
+- 기본 응답은 `visibilityAfterGame = PUBLIC` 사건만 포함한다.
 - `JOIN_ROOM` / `LEAVE_ROOM`은 room 참여 상태를 바꾸고 `PlayerJoined` / `PlayerLeft`를 남긴다.
 - `START_GAME`은 `GameStarted`와 `RoleAssigned`를 남기고, 역할은 개인에게만 전송된다.
 - `NEXT_PHASE`는 `PhaseChanged`를 남기고, phase 전환은 `NIGHT` / `DAY_DISCUSSION` / `VOTING` / `RESULT` 순환 흐름을 따른다.
@@ -94,8 +95,9 @@
 
 ## 7. 아직 구현하지 않는 것
 
-- visibility 필터링 로직
-- timeline 조회 API
-- 실제 game command handler
+- viewer role 기반 visibility 필터링
+- 인증/인가 기반 timeline 접근 제어
+- includePrivate 같은 관리자/개발용 조회 옵션
+- 실제 채팅 command handler
 
-Prisma `GameEventLog` 모델과 `GameEventRecorderService`는 추가되었고, 실제 조회 API는 아직 구현하지 않는다.
+기본 timeline 조회 API는 추가되었고, 현재 응답은 `visibilityAfterGame = PUBLIC` 사건만 포함한다. viewer role 기반 세부 공개 범위 필터링은 이후 작업에서 구현한다.
