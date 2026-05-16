@@ -94,7 +94,36 @@ test('save() 후 findByGameId()로 조회할 수 있다', async () => {
 
     assert.deepEqual(saved, session);
     assert.deepEqual(loaded, session);
+    const ttl = await redisService
+      .getClient()
+      .ttl(redisService.buildKey(`game-session:${session.gameId}`));
+    assert.ok(ttl > 0);
   } finally {
+    await cleanup(session.gameId);
+  }
+});
+
+test('잘못된 TTL 값이면 기본 TTL을 사용한다', async () => {
+  const originalTtl = process.env.GAME_SESSION_TTL_SECONDS;
+  const session = createSession();
+
+  try {
+    process.env.GAME_SESSION_TTL_SECONDS = '1.5';
+
+    await repository.save(session);
+
+    const ttl = await redisService
+      .getClient()
+      .ttl(redisService.buildKey(`game-session:${session.gameId}`));
+
+    assert.ok(ttl > 0);
+    assert.ok(ttl <= 86400);
+  } finally {
+    if (originalTtl === undefined) {
+      delete process.env.GAME_SESSION_TTL_SECONDS;
+    } else {
+      process.env.GAME_SESSION_TTL_SECONDS = originalTtl;
+    }
     await cleanup(session.gameId);
   }
 });

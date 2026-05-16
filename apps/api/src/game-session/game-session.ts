@@ -40,3 +40,5 @@ export interface GameSessionRepository {
   save(session: GameSession): Promise<GameSession>;
   findByGameId(gameId: string): Promise<GameSession | null>;
 }
+
+export const GAME_SESSION_REPOSITORY = 'GAME_SESSION_REPOSITORY';

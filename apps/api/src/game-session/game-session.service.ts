@@ -4,8 +4,12 @@ import type {
   PlayerStatus,
   Role,
 } from '@mafia-casefile/shared';
-import type { GameSession, GameSessionPlayer } from './game-session';
-import { InMemoryGameSessionRepository } from './in-memory-game-session.repository';
+import {
+  GAME_SESSION_REPOSITORY,
+  type GameSession,
+  type GameSessionPlayer,
+  type GameSessionRepository,
+} from './game-session';
 import {
   GameStateMachine,
   type PhaseTransitionResult,
@@ -65,8 +69,8 @@ export class GameSessionService {
   private readonly stateMachine = new GameStateMachine();
 
   constructor(
-    @Inject(InMemoryGameSessionRepository)
-    private readonly repository: InMemoryGameSessionRepository,
+    @Inject(GAME_SESSION_REPOSITORY)
+    private readonly repository: GameSessionRepository,
   ) {}
 
   async startGameSession(

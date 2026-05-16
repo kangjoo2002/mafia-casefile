@@ -54,7 +54,11 @@ export class RedisGameSessionRepository implements GameSessionRepository {
 
   async save(session: GameSession): Promise<GameSession> {
     const payload = serializeGameSession(session);
-    await this.redisService.set(this.key(session.gameId), JSON.stringify(payload));
+    await this.redisService.set(
+      this.key(session.gameId),
+      JSON.stringify(payload),
+      this.resolveTtlSeconds(),
+    );
     return deserializeGameSession(payload);
   }
 
@@ -71,5 +75,16 @@ export class RedisGameSessionRepository implements GameSessionRepository {
 
   private key(gameId: string) {
     return `game-session:${gameId}`;
+  }
+
+  private resolveTtlSeconds() {
+    const raw = process.env.GAME_SESSION_TTL_SECONDS;
+    if (!raw) {
+      return 86400;
+    }
+
+    const value = Number(raw);
+
+    return Number.isInteger(value) && value > 0 ? value : 86400;
   }
 }
