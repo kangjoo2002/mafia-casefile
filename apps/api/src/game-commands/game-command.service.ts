@@ -39,7 +39,7 @@ type NightTargetCommandPayload = {
   targetUserId?: unknown;
 };
 
-type SupportedChatChannel = 'LOBBY' | 'DAY';
+type SupportedChatChannel = 'LOBBY' | 'DAY' | 'MAFIA' | 'GHOST';
 
 type ChatCommandPayload = {
   channel?: unknown;
@@ -50,6 +50,10 @@ type ParsedChatCommandPayload = {
   channel: SupportedChatChannel;
   message: string;
 };
+
+type GameSessionSnapshot = NonNullable<
+  Awaited<ReturnType<GameSessionService['findByGameId']>>
+>;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -908,7 +912,25 @@ export class GameCommandService {
       );
     }
 
-    return await this.handleDayChat(
+    if (payloadResult.payload.channel === 'DAY') {
+      return await this.handleDayChat(
+        parsed,
+        user,
+        payloadResult.payload,
+        sentAt,
+      );
+    }
+
+    if (payloadResult.payload.channel === 'MAFIA') {
+      return await this.handleMafiaChat(
+        parsed,
+        user,
+        payloadResult.payload,
+        sentAt,
+      );
+    }
+
+    return await this.handleGhostChat(
       parsed,
       user,
       payloadResult.payload,
@@ -1062,6 +1084,152 @@ export class GameCommandService {
     ]);
   }
 
+  private async handleMafiaChat(
+    parsed: GameCommandEnvelope,
+    user: GameCommandUser,
+    payload: ParsedChatCommandPayload,
+    sentAt: string,
+  ): Promise<GameCommandResult> {
+    const session = await this.gameSessionService.findByGameId(parsed.gameId);
+
+    if (!session) {
+      return this.reject(
+        parsed.requestId,
+        'GAME_SESSION_NOT_FOUND',
+        'game session not found',
+      );
+    }
+
+    if (session.phase !== 'NIGHT') {
+      return this.reject(
+        parsed.requestId,
+        'CHAT_NOT_ALLOWED_IN_CURRENT_PHASE',
+        'chat is not allowed in current phase',
+      );
+    }
+
+    const actor = session.players.find((player) => player.userId === user.id);
+
+    if (!actor) {
+      return this.reject(
+        parsed.requestId,
+        'PLAYER_NOT_IN_GAME',
+        'player not found in game session',
+      );
+    }
+
+    if (actor.role !== 'MAFIA') {
+      return this.reject(
+        parsed.requestId,
+        'ROLE_NOT_ALLOWED',
+        'role not allowed',
+      );
+    }
+
+    if (actor.status !== 'ALIVE') {
+      return this.reject(
+        parsed.requestId,
+        'PLAYER_NOT_ALIVE',
+        'player is not alive',
+      );
+    }
+
+    const recipients = this.getAliveMafiaRecipients(session);
+    const event = this.buildChatMessageEvent({
+      gameId: parsed.gameId,
+      channel: payload.channel,
+      message: payload.message,
+      senderUserId: user.id,
+      sentAt,
+    });
+
+    await this.recordChatMessage({
+      gameId: parsed.gameId,
+      turn: session.turn,
+      phase: session.phase,
+      actorUserId: user.id,
+      channel: payload.channel,
+      message: payload.message,
+      senderUserId: user.id,
+      requestId: parsed.requestId,
+      visibilityDuringGame: EventVisibility.MAFIA_ONLY,
+    });
+
+    return this.accept(parsed.requestId, parsed.type, [
+      ...recipients.map((recipient) => ({
+        kind: 'private' as const,
+        userId: recipient.userId,
+        eventName: 'chat:message',
+        payload: event,
+      })),
+    ]);
+  }
+
+  private async handleGhostChat(
+    parsed: GameCommandEnvelope,
+    user: GameCommandUser,
+    payload: ParsedChatCommandPayload,
+    sentAt: string,
+  ): Promise<GameCommandResult> {
+    const session = await this.gameSessionService.findByGameId(parsed.gameId);
+
+    if (!session) {
+      return this.reject(
+        parsed.requestId,
+        'GAME_SESSION_NOT_FOUND',
+        'game session not found',
+      );
+    }
+
+    const actor = session.players.find((player) => player.userId === user.id);
+
+    if (!actor) {
+      return this.reject(
+        parsed.requestId,
+        'PLAYER_NOT_IN_GAME',
+        'player not found in game session',
+      );
+    }
+
+    if (actor.status !== 'DEAD') {
+      return this.reject(
+        parsed.requestId,
+        'PLAYER_NOT_DEAD',
+        'player is not dead',
+      );
+    }
+
+    const recipients = this.getGhostRecipients(session);
+    const event = this.buildChatMessageEvent({
+      gameId: parsed.gameId,
+      channel: payload.channel,
+      message: payload.message,
+      senderUserId: user.id,
+      sentAt,
+    });
+
+    await this.recordChatMessage({
+      gameId: parsed.gameId,
+      turn: session.turn,
+      phase: session.phase,
+      actorUserId: user.id,
+      channel: payload.channel,
+      message: payload.message,
+      senderUserId: user.id,
+      requestId: parsed.requestId,
+      visibilityDuringGame: EventVisibility.GHOST_ONLY,
+    });
+
+    return this.accept(parsed.requestId, parsed.type, [
+      ...recipients.map((recipient) => ({
+        kind: 'private' as const,
+        userId: recipient.userId,
+        eventName: 'chat:message',
+        payload: event,
+      })),
+    ]);
+  }
+
   private parseChatPayload(
     payload: unknown,
   ):
@@ -1125,7 +1293,45 @@ export class GameCommandService {
   }
 
   private isSupportedChatChannel(value: unknown): value is SupportedChatChannel {
-    return value === 'LOBBY' || value === 'DAY';
+    return value === 'LOBBY' || value === 'DAY' || value === 'MAFIA' || value === 'GHOST';
+  }
+
+  private getAliveMafiaRecipients(session: GameSessionSnapshot) {
+    return session.players.filter(
+      (player) => player.role === 'MAFIA' && player.status === 'ALIVE',
+    );
+  }
+
+  private getGhostRecipients(session: GameSessionSnapshot) {
+    return session.players.filter((player) => player.status === 'DEAD');
+  }
+
+  private async recordChatMessage(input: {
+    gameId: string;
+    turn: number;
+    phase: string;
+    actorUserId: string;
+    channel: ChatChannel;
+    message: string;
+    senderUserId: string;
+    requestId: string;
+    visibilityDuringGame: EventVisibility;
+  }) {
+    await this.gameEventRecorder.recordEvent({
+      gameId: input.gameId,
+      type: 'ChatMessageSent',
+      turn: input.turn,
+      phase: input.phase,
+      actorUserId: input.actorUserId,
+      payload: {
+        channel: input.channel,
+        message: input.message,
+        senderUserId: input.senderUserId,
+      },
+      visibilityDuringGame: input.visibilityDuringGame,
+      visibilityAfterGame: EventVisibility.PUBLIC,
+      requestId: input.requestId,
+    });
   }
 
   private buildChatMessageEvent(input: {

@@ -6,7 +6,7 @@ export interface SocketUser {
   email: string;
 }
 
-export type ChatChannel = "LOBBY" | "DAY" | "SYSTEM";
+export type ChatChannel = "LOBBY" | "DAY" | "MAFIA" | "GHOST" | "SYSTEM";
 
 export interface ChatMessageEvent {
   type: "chat:message";

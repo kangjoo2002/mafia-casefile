@@ -131,6 +131,29 @@ async function waitForEvent<T>(socket: Socket, eventName: string) {
   });
 }
 
+function assertNoEvent(
+  socket: Socket,
+  eventName: string,
+  timeoutMs = 100,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onEvent = (payload: unknown) => {
+      clearTimeout(timer);
+      socket.off(eventName, onEvent);
+      reject(
+        new Error(`${eventName} should not be emitted: ${JSON.stringify(payload)}`),
+      );
+    };
+
+    const timer = setTimeout(() => {
+      socket.off(eventName, onEvent);
+      resolve();
+    }, timeoutMs);
+
+    socket.once(eventName, onEvent);
+  });
+}
+
 function buildAuthedSocket(userId: string, email: string) {
   const jwtService = new JwtService();
   const token = jwtService.signAccessToken({
@@ -1394,6 +1417,653 @@ test('day chat rejects dead player', async () => {
 
   assert.equal(response.type, 'COMMAND_REJECTED');
   assert.equal(response.reason, 'PLAYER_NOT_ALIVE');
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('mafia chat sends only to alive mafia players', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-mafia-host',
+    name: 'chat-mafia',
+  });
+
+  const host = buildAuthedSocket('chat-mafia-host', 'chat-mafia-host@example.com');
+  const guest1 = buildAuthedSocket(
+    'chat-mafia-guest-1',
+    'chat-mafia-guest-1@example.com',
+  );
+  const guest2 = buildAuthedSocket(
+    'chat-mafia-guest-2',
+    'chat-mafia-guest-2@example.com',
+  );
+  const guest3 = buildAuthedSocket(
+    'chat-mafia-guest-3',
+    'chat-mafia-guest-3@example.com',
+  );
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-chat-mafia-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-chat-mafia-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-chat-mafia-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-chat-mafia-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-chat-mafia-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-chat-mafia-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-chat-mafia-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-chat-mafia-ready-4');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-mafia-start-1',
+  );
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+
+  const startedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(startedSession);
+
+  const socketsByUserId = new Map<string, Socket>([
+    ['chat-mafia-host', host.socket],
+    ['chat-mafia-guest-1', guest1.socket],
+    ['chat-mafia-guest-2', guest2.socket],
+    ['chat-mafia-guest-3', guest3.socket],
+  ]);
+
+  const mafiaPlayer = startedSession?.players.find(
+    (player) => player.role === 'MAFIA',
+  );
+  const doctorPlayer = startedSession?.players.find(
+    (player) => player.role === 'DOCTOR',
+  );
+  const policePlayer = startedSession?.players.find(
+    (player) => player.role === 'POLICE',
+  );
+  const citizenPlayer = startedSession?.players.find(
+    (player) => player.role === 'CITIZEN',
+  );
+
+  assert.ok(mafiaPlayer);
+  assert.ok(doctorPlayer);
+  assert.ok(policePlayer);
+  assert.ok(citizenPlayer);
+
+  const mafiaSocket = socketsByUserId.get(mafiaPlayer.userId);
+  const doctorSocket = socketsByUserId.get(doctorPlayer.userId);
+  const policeSocket = socketsByUserId.get(policePlayer.userId);
+  const citizenSocket = socketsByUserId.get(citizenPlayer.userId);
+
+  assert.ok(mafiaSocket);
+  assert.ok(doctorSocket);
+  assert.ok(policeSocket);
+  assert.ok(citizenSocket);
+
+  const nonMafiaListeners = [doctorSocket, policeSocket, citizenSocket].map(
+    (socket) => assertNoEvent(socket!, 'chat:message', 100),
+  );
+
+  const mafiaChatEvent = waitForEvent<ChatMessageEvent>(
+    mafiaSocket,
+    'chat:message',
+  );
+
+  const response = chatCommand(
+    mafiaSocket,
+    room.roomId,
+    {
+      channel: 'MAFIA',
+      message: '  오늘은 user-3을 봅시다.  ',
+    },
+    'req-chat-mafia-1',
+  );
+
+  const [responseMessage, mafiaChat] = await Promise.all([
+    response,
+    mafiaChatEvent,
+  ]);
+
+  await Promise.all(nonMafiaListeners);
+
+  assert.equal(responseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(responseMessage.requestId, 'req-chat-mafia-1');
+  assert.equal(responseMessage.receivedType, 'SEND_CHAT_MESSAGE');
+  assert.equal(mafiaChat.type, 'chat:message');
+  assert.equal(mafiaChat.channel, 'MAFIA');
+  assert.equal(mafiaChat.message, '오늘은 user-3을 봅시다.');
+  assert.equal(mafiaChat.senderUserId, mafiaPlayer.userId);
+  assert.equal(mafiaChat.gameId, room.roomId);
+
+  const events = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: 'ChatMessageSent',
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  const mafiaEvent = events.find(
+    (event) => (event.payload as { channel?: string } | null)?.channel === 'MAFIA',
+  );
+
+  assert.ok(mafiaEvent);
+  assert.equal(mafiaEvent?.requestId, 'req-chat-mafia-1');
+  assert.equal(mafiaEvent?.actorUserId, mafiaPlayer.userId);
+  assert.equal(mafiaEvent?.phase, 'NIGHT');
+  assert.equal(mafiaEvent?.visibilityDuringGame, 'MAFIA_ONLY');
+  assert.equal(mafiaEvent?.visibilityAfterGame, 'PUBLIC');
+  assert.deepEqual(mafiaEvent?.payload, {
+    channel: 'MAFIA',
+    message: '오늘은 user-3을 봅시다.',
+    senderUserId: mafiaPlayer.userId,
+  });
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('mafia chat rejects non-mafia and outside NIGHT', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-mafia-reject-host',
+    name: 'chat-mafia-reject',
+  });
+
+  const host = buildAuthedSocket(
+    'chat-mafia-reject-host',
+    'chat-mafia-reject-host@example.com',
+  );
+  const guest1 = buildAuthedSocket(
+    'chat-mafia-reject-guest-1',
+    'chat-mafia-reject-guest-1@example.com',
+  );
+  const guest2 = buildAuthedSocket(
+    'chat-mafia-reject-guest-2',
+    'chat-mafia-reject-guest-2@example.com',
+  );
+  const guest3 = buildAuthedSocket(
+    'chat-mafia-reject-guest-3',
+    'chat-mafia-reject-guest-3@example.com',
+  );
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(
+    host.socket,
+    room.roomId,
+    'host',
+    'req-chat-mafia-reject-join-1',
+  );
+  await joinRoomCommand(
+    guest1.socket,
+    room.roomId,
+    'g1',
+    'req-chat-mafia-reject-join-2',
+  );
+  await joinRoomCommand(
+    guest2.socket,
+    room.roomId,
+    'g2',
+    'req-chat-mafia-reject-join-3',
+  );
+  await joinRoomCommand(
+    guest3.socket,
+    room.roomId,
+    'g3',
+    'req-chat-mafia-reject-join-4',
+  );
+
+  await readyRoomCommand(
+    host.socket,
+    room.roomId,
+    true,
+    'req-chat-mafia-reject-ready-1',
+  );
+  await readyRoomCommand(
+    guest1.socket,
+    room.roomId,
+    true,
+    'req-chat-mafia-reject-ready-2',
+  );
+  await readyRoomCommand(
+    guest2.socket,
+    room.roomId,
+    true,
+    'req-chat-mafia-reject-ready-3',
+  );
+  await readyRoomCommand(
+    guest3.socket,
+    room.roomId,
+    true,
+    'req-chat-mafia-reject-ready-4',
+  );
+
+  await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-mafia-reject-start-1',
+  );
+
+  const startedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(startedSession);
+
+  const socketsByUserId = new Map<string, Socket>([
+    ['chat-mafia-reject-host', host.socket],
+    ['chat-mafia-reject-guest-1', guest1.socket],
+    ['chat-mafia-reject-guest-2', guest2.socket],
+    ['chat-mafia-reject-guest-3', guest3.socket],
+  ]);
+
+  const mafiaPlayer = startedSession?.players.find(
+    (player) => player.role === 'MAFIA',
+  );
+  const nonMafiaPlayer = startedSession?.players.find(
+    (player) => player.role !== 'MAFIA',
+  );
+
+  assert.ok(mafiaPlayer);
+  assert.ok(nonMafiaPlayer);
+
+  const mafiaSocket = socketsByUserId.get(mafiaPlayer.userId);
+  const nonMafiaSocket = socketsByUserId.get(nonMafiaPlayer.userId);
+
+  assert.ok(mafiaSocket);
+  assert.ok(nonMafiaSocket);
+
+  const nonMafiaResponse = await chatCommand(
+    nonMafiaSocket,
+    room.roomId,
+    {
+      channel: 'MAFIA',
+      message: '안녕하세요',
+    },
+    'req-chat-mafia-reject-1',
+  );
+
+  assert.equal(nonMafiaResponse.type, 'COMMAND_REJECTED');
+  assert.equal(nonMafiaResponse.reason, 'ROLE_NOT_ALLOWED');
+
+  await nextPhaseCommand(host.socket, room.roomId, 'req-chat-mafia-reject-next-1');
+
+  const mafiaChatResponse = await chatCommand(
+    mafiaSocket,
+    room.roomId,
+    {
+      channel: 'MAFIA',
+      message: '밤 채팅입니다',
+    },
+    'req-chat-mafia-reject-2',
+  );
+
+  assert.equal(mafiaChatResponse.type, 'COMMAND_REJECTED');
+  assert.equal(mafiaChatResponse.reason, 'CHAT_NOT_ALLOWED_IN_CURRENT_PHASE');
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('ghost chat sends only to dead players', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-ghost-host',
+    name: 'chat-ghost',
+  });
+
+  const host = buildAuthedSocket('chat-ghost-host', 'chat-ghost-host@example.com');
+  const guest1 = buildAuthedSocket(
+    'chat-ghost-guest-1',
+    'chat-ghost-guest-1@example.com',
+  );
+  const guest2 = buildAuthedSocket(
+    'chat-ghost-guest-2',
+    'chat-ghost-guest-2@example.com',
+  );
+  const guest3 = buildAuthedSocket(
+    'chat-ghost-guest-3',
+    'chat-ghost-guest-3@example.com',
+  );
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-chat-ghost-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-chat-ghost-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-chat-ghost-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-chat-ghost-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-chat-ghost-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-chat-ghost-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-chat-ghost-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-chat-ghost-ready-4');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-ghost-start-1',
+  );
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+
+  const startedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(startedSession);
+
+  const socketsByUserId = new Map<string, Socket>([
+    ['chat-ghost-host', host.socket],
+    ['chat-ghost-guest-1', guest1.socket],
+    ['chat-ghost-guest-2', guest2.socket],
+    ['chat-ghost-guest-3', guest3.socket],
+  ]);
+
+  const mafiaPlayer = startedSession?.players.find(
+    (player) => player.role === 'MAFIA',
+  );
+  const doctorPlayer = startedSession?.players.find(
+    (player) => player.role === 'DOCTOR',
+  );
+  const policePlayer = startedSession?.players.find(
+    (player) => player.role === 'POLICE',
+  );
+  const citizenPlayer = startedSession?.players.find(
+    (player) => player.role === 'CITIZEN',
+  );
+
+  assert.ok(mafiaPlayer);
+  assert.ok(doctorPlayer);
+  assert.ok(policePlayer);
+  assert.ok(citizenPlayer);
+
+  const mafiaSocket = socketsByUserId.get(mafiaPlayer.userId);
+  const doctorSocket = socketsByUserId.get(doctorPlayer.userId);
+  const policeSocket = socketsByUserId.get(policePlayer.userId);
+  const citizenSocket = socketsByUserId.get(citizenPlayer.userId);
+
+  assert.ok(mafiaSocket);
+  assert.ok(doctorSocket);
+  assert.ok(policeSocket);
+  assert.ok(citizenSocket);
+
+  await nightActionCommand(
+    mafiaSocket,
+    'SELECT_MAFIA_TARGET',
+    room.roomId,
+    citizenPlayer.userId,
+    'req-chat-ghost-mafia-1',
+  );
+  await nightActionCommand(
+    doctorSocket,
+    'SELECT_DOCTOR_TARGET',
+    room.roomId,
+    mafiaPlayer.userId,
+    'req-chat-ghost-doctor-1',
+  );
+  await nightActionCommand(
+    policeSocket,
+    'SELECT_POLICE_TARGET',
+    room.roomId,
+    mafiaPlayer.userId,
+    'req-chat-ghost-police-1',
+  );
+
+  await nextPhaseCommand(host.socket, room.roomId, 'req-chat-ghost-next-1');
+
+  const resolvedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(resolvedSession);
+
+  const deadPlayers =
+    resolvedSession?.players.filter((player) => player.status === 'DEAD') ?? [];
+  const alivePlayers =
+    resolvedSession?.players.filter((player) => player.status === 'ALIVE') ?? [];
+
+  assert.ok(deadPlayers.length > 0);
+  assert.ok(alivePlayers.length > 0);
+
+  const deadSender = deadPlayers[0]!;
+  const deadSocket = socketsByUserId.get(deadSender.userId);
+  assert.ok(deadSocket);
+
+  const aliveListeners = alivePlayers.map((player) => {
+    const socket = socketsByUserId.get(player.userId);
+    assert.ok(socket);
+    return assertNoEvent(socket!, 'chat:message', 100);
+  });
+
+  const ghostEvent = waitForEvent<ChatMessageEvent>(
+    deadSocket,
+    'chat:message',
+  );
+
+  const response = chatCommand(
+    deadSocket,
+    room.roomId,
+    {
+      channel: 'GHOST',
+      message: '  사망자 채팅입니다.  ',
+    },
+    'req-chat-ghost-1',
+  );
+
+  const [responseMessage, ghostChat] = await Promise.all([response, ghostEvent]);
+  await Promise.all(aliveListeners);
+
+  assert.equal(responseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(responseMessage.requestId, 'req-chat-ghost-1');
+  assert.equal(responseMessage.receivedType, 'SEND_CHAT_MESSAGE');
+  assert.equal(ghostChat.type, 'chat:message');
+  assert.equal(ghostChat.channel, 'GHOST');
+  assert.equal(ghostChat.message, '사망자 채팅입니다.');
+  assert.equal(ghostChat.senderUserId, deadSender.userId);
+  assert.equal(ghostChat.gameId, room.roomId);
+
+  const events = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: 'ChatMessageSent',
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  const ghostEventRecord = events.find(
+    (event) => (event.payload as { channel?: string } | null)?.channel === 'GHOST',
+  );
+
+  assert.ok(ghostEventRecord);
+  assert.equal(ghostEventRecord?.requestId, 'req-chat-ghost-1');
+  assert.equal(ghostEventRecord?.actorUserId, deadSender.userId);
+  assert.equal(ghostEventRecord?.visibilityDuringGame, 'GHOST_ONLY');
+  assert.equal(ghostEventRecord?.visibilityAfterGame, 'PUBLIC');
+  assert.equal(ghostEventRecord?.phase, resolvedSession?.phase);
+  assert.deepEqual(ghostEventRecord?.payload, {
+    channel: 'GHOST',
+    message: '사망자 채팅입니다.',
+    senderUserId: deadSender.userId,
+  });
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('ghost chat rejects alive player and system channel still rejects', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'chat-ghost-reject-host',
+    name: 'chat-ghost-reject',
+  });
+
+  const host = buildAuthedSocket(
+    'chat-ghost-reject-host',
+    'chat-ghost-reject-host@example.com',
+  );
+  const guest1 = buildAuthedSocket(
+    'chat-ghost-reject-guest-1',
+    'chat-ghost-reject-guest-1@example.com',
+  );
+  const guest2 = buildAuthedSocket(
+    'chat-ghost-reject-guest-2',
+    'chat-ghost-reject-guest-2@example.com',
+  );
+  const guest3 = buildAuthedSocket(
+    'chat-ghost-reject-guest-3',
+    'chat-ghost-reject-guest-3@example.com',
+  );
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(
+    host.socket,
+    room.roomId,
+    'host',
+    'req-chat-ghost-reject-join-1',
+  );
+  await joinRoomCommand(
+    guest1.socket,
+    room.roomId,
+    'g1',
+    'req-chat-ghost-reject-join-2',
+  );
+  await joinRoomCommand(
+    guest2.socket,
+    room.roomId,
+    'g2',
+    'req-chat-ghost-reject-join-3',
+  );
+  await joinRoomCommand(
+    guest3.socket,
+    room.roomId,
+    'g3',
+    'req-chat-ghost-reject-join-4',
+  );
+
+  await readyRoomCommand(
+    host.socket,
+    room.roomId,
+    true,
+    'req-chat-ghost-reject-ready-1',
+  );
+  await readyRoomCommand(
+    guest1.socket,
+    room.roomId,
+    true,
+    'req-chat-ghost-reject-ready-2',
+  );
+  await readyRoomCommand(
+    guest2.socket,
+    room.roomId,
+    true,
+    'req-chat-ghost-reject-ready-3',
+  );
+  await readyRoomCommand(
+    guest3.socket,
+    room.roomId,
+    true,
+    'req-chat-ghost-reject-ready-4',
+  );
+
+  await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-chat-ghost-reject-start-1',
+  );
+
+  const startedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(startedSession);
+
+  const alivePlayer = startedSession?.players.find(
+    (player) => player.status === 'ALIVE',
+  );
+  assert.ok(alivePlayer);
+
+  const aliveSocket = host.socket;
+
+  const aliveResponse = await chatCommand(
+    aliveSocket,
+    room.roomId,
+    {
+      channel: 'GHOST',
+      message: '안녕하세요',
+    },
+    'req-chat-ghost-reject-1',
+  );
+
+  assert.equal(aliveResponse.type, 'COMMAND_REJECTED');
+  assert.equal(aliveResponse.reason, 'PLAYER_NOT_DEAD');
+
+  const systemResponse = await chatCommand(
+    aliveSocket,
+    room.roomId,
+    {
+      channel: 'SYSTEM',
+      message: '시스템 메시지',
+    },
+    'req-chat-ghost-reject-2',
+  );
+
+  assert.equal(systemResponse.type, 'COMMAND_REJECTED');
+  assert.equal(systemResponse.reason, 'INVALID_CHAT_CHANNEL');
 
   await prisma.gameEventLog.deleteMany({
     where: {
