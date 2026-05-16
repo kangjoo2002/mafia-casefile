@@ -723,6 +723,24 @@ export class RealtimeGateway
         }
       }
 
+      await this.gameEventRecorder.recordEvent({
+        gameId: parsed.gameId,
+        type: 'PhaseChanged',
+        turn: transition.toTurn,
+        phase: transition.toPhase,
+        actorUserId: null,
+        payload: {
+          gameId: parsed.gameId,
+          fromPhase: transition.fromPhase,
+          toPhase: transition.toPhase,
+          turn: transition.toTurn,
+          requestedByUserId: user.id,
+        },
+        visibilityDuringGame: EventVisibility.PUBLIC,
+        visibilityAfterGame: EventVisibility.PUBLIC,
+        requestId: parsed.requestId,
+      });
+
       if (resolutionEvent) {
         await this.gameEventRecorder.recordEvent({
           gameId: parsed.gameId,
@@ -754,24 +772,6 @@ export class RealtimeGateway
           requestId: parsed.requestId,
         });
       }
-
-      await this.gameEventRecorder.recordEvent({
-        gameId: parsed.gameId,
-        type: 'PhaseChanged',
-        turn: transition.toTurn,
-        phase: transition.toPhase,
-        actorUserId: null,
-        payload: {
-          gameId: parsed.gameId,
-          fromPhase: transition.fromPhase,
-          toPhase: transition.toPhase,
-          turn: transition.toTurn,
-          requestedByUserId: user.id,
-        },
-        visibilityDuringGame: EventVisibility.PUBLIC,
-        visibilityAfterGame: EventVisibility.PUBLIC,
-        requestId: parsed.requestId,
-      });
 
       const phaseChangedEvent: PhaseChangedEvent = {
         type: 'phase:changed',

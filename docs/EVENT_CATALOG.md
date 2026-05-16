@@ -16,7 +16,7 @@
 - `NEXT_PHASE`는 `PhaseChanged`를 남기고, phase 전환은 `NIGHT` / `DAY_DISCUSSION` / `VOTING` / `RESULT` 순환 흐름을 따른다.
 - `SELECT_MAFIA_TARGET` / `SELECT_DOCTOR_TARGET` / `SELECT_POLICE_TARGET`는 `NIGHT`에서만 허용되고, 각 선택은 대응하는 night event로 저장된다.
 - `CAST_VOTE`는 `VOTING`에서만 허용되고, requestId 중복은 1차로 차단된다.
-- `NEXT_PHASE`가 결과 phase로 넘어갈 때는 `PlayerKilled`, `PlayerExecuted`, `GameFinished`가 함께 발생할 수 있다.
+- `NEXT_PHASE`가 결과 phase로 넘어갈 때는 `PhaseChanged`가 먼저 기록되고, 그 뒤에 `PlayerKilled`, `PlayerExecuted`, `GameFinished`가 이어질 수 있다.
 - room 참여 변경은 `room:updated` broadcast와 함께 반영된다.
 
 ## 2. GameEvent 기본 원칙

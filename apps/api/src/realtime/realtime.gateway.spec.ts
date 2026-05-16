@@ -1549,22 +1549,43 @@ test('night actions require the right role and record selections', async () => {
   const killedEvents = await prisma.gameEventLog.findMany({
     where: {
       gameId: room.roomId,
-      type: 'PlayerKilled',
+      type: {
+        in: ['PhaseChanged', 'PlayerKilled'],
+      },
     },
     orderBy: {
       seq: 'asc',
     },
   });
 
-  assert.equal(killedEvents.length, 1);
+  assert.equal(killedEvents.length, 2);
+  assert.deepEqual(
+    killedEvents.map((event) => event.type),
+    ['PhaseChanged', 'PlayerKilled'],
+  );
   assert.equal(killedEvents[0]?.requestId, 'req-night-next-1');
+  assert.equal(killedEvents[1]?.requestId, 'req-night-next-1');
   assert.equal(
-    (killedEvents[0]?.payload as { targetUserId?: string; cause?: string })
+    (killedEvents[0]?.payload as {
+      fromPhase?: string;
+      toPhase?: string;
+    })?.fromPhase,
+    'NIGHT',
+  );
+  assert.equal(
+    (killedEvents[0]?.payload as {
+      fromPhase?: string;
+      toPhase?: string;
+    })?.toPhase,
+    'DAY_DISCUSSION',
+  );
+  assert.equal(
+    (killedEvents[1]?.payload as { targetUserId?: string; cause?: string })
       ?.targetUserId,
     citizenPlayer.userId,
   );
   assert.equal(
-    (killedEvents[0]?.payload as { targetUserId?: string; cause?: string })
+    (killedEvents[1]?.payload as { targetUserId?: string; cause?: string })
       ?.cause,
     'MAFIA_ATTACK',
   );
@@ -1774,7 +1795,7 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   const phaseResolution = await nextPhaseCommand(
     host.socket,
     room.roomId,
-    'req-vote-next-1',
+    'req-vote-next-3',
   );
 
   assert.equal(phaseResolution.type, 'COMMAND_ACCEPTED');
@@ -1793,8 +1814,9 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   const executedEvents = await prisma.gameEventLog.findMany({
     where: {
       gameId: room.roomId,
+      requestId: 'req-vote-next-3',
       type: {
-        in: ['PlayerExecuted', 'GameFinished'],
+        in: ['PhaseChanged', 'PlayerExecuted', 'GameFinished'],
       },
     },
     orderBy: {
@@ -1804,14 +1826,28 @@ test('cast vote records one vote per user and deduplicates request ids', async (
 
   assert.deepEqual(
     executedEvents.map((event) => event.type),
-    ['PlayerExecuted', 'GameFinished'],
+    ['PhaseChanged', 'PlayerExecuted', 'GameFinished'],
   );
   assert.equal(
-    (executedEvents[0]?.payload as { targetUserId?: string })?.targetUserId,
+    (executedEvents[0]?.payload as {
+      fromPhase?: string;
+      toPhase?: string;
+    })?.fromPhase,
+    'VOTING',
+  );
+  assert.equal(
+    (executedEvents[0]?.payload as {
+      fromPhase?: string;
+      toPhase?: string;
+    })?.toPhase,
+    'RESULT',
+  );
+  assert.equal(
+    (executedEvents[1]?.payload as { targetUserId?: string })?.targetUserId,
     voteTargetUserId,
   );
   assert.equal(
-    (executedEvents[1]?.payload as { winnerTeam?: string })?.winnerTeam,
+    (executedEvents[2]?.payload as { winnerTeam?: string })?.winnerTeam,
     'CITIZEN',
   );
 
