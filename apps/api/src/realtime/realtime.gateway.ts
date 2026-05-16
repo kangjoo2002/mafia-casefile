@@ -13,12 +13,14 @@ import { Server, Socket } from 'socket.io';
 import { EventVisibility } from '@prisma/client';
 import { JwtService } from '../auth/jwt.service';
 import { GameEventRecorderService } from '../game-events/game-event-recorder.service';
+import { GameSessionService } from '../game-session/game-session.service';
 import { RoomsService, type Room } from '../rooms/rooms.service';
 import type {
   GameStartedEvent,
   CommandAcceptedEvent,
   CommandRejectedEvent,
   PongEvent,
+  PhaseChangedEvent,
   Role,
   RoleAssignedEvent,
   WhoamiEvent,
@@ -79,6 +81,8 @@ export class RealtimeGateway
   constructor(
     @Inject(JwtService) private readonly jwtService: JwtService,
     @Inject(RoomsService) private readonly roomsService: RoomsService,
+    @Inject(GameSessionService)
+    private readonly gameSessionService: GameSessionService,
     @Inject(GameEventRecorderService)
     private readonly gameEventRecorder: GameEventRecorderService,
   ) {}
@@ -165,6 +169,11 @@ export class RealtimeGateway
 
     if (parsed.type === 'START_GAME') {
       await this.handleStartGame(parsed, client);
+      return;
+    }
+
+    if (parsed.type === 'NEXT_PHASE') {
+      await this.handleNextPhase(parsed, client);
       return;
     }
 
@@ -421,6 +430,23 @@ export class RealtimeGateway
       const startedAt = new Date().toISOString();
       const roleAssignments = this.buildRoleAssignments(room);
 
+      await this.gameSessionService.startGameSession({
+        gameId: parsed.gameId,
+        roomId: parsed.gameId,
+        hostUserId: user.id,
+        players: roleAssignments.map((assignment, index) => {
+          const participant = room.participants.find(
+            (current) => current.userId === assignment.userId,
+          );
+
+          return {
+            userId: assignment.userId,
+            nickname: participant?.nickname ?? `player-${index + 1}`,
+            role: assignment.role,
+          };
+        }),
+      });
+
       await this.gameEventRecorder.recordEvent({
         gameId: parsed.gameId,
         type: 'GameStarted',
@@ -549,6 +575,86 @@ export class RealtimeGateway
           ? 'ROOM_NOT_FOUND'
           : message === 'participant not found'
             ? 'PARTICIPANT_NOT_FOUND'
+            : 'ROOM_COMMAND_FAILED';
+
+      this.emitRoomRejected(client, parsed.requestId, reason, message);
+    }
+  }
+
+  private async handleNextPhase(
+    parsed: RoomCommandEnvelope,
+    client: Socket,
+  ) {
+    const authedClient = client as AuthenticatedSocket;
+    const user = authedClient.data.user;
+
+    if (!user) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'UNAUTHORIZED',
+        'Socket user is missing.',
+      );
+      return;
+    }
+
+    if (
+      typeof parsed.payload !== 'object' ||
+      parsed.payload === null ||
+      Array.isArray(parsed.payload)
+    ) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'INVALID_ROOM_COMMAND',
+        'Room command payload is invalid.',
+      );
+      return;
+    }
+
+    try {
+      const transition = await this.gameSessionService.advancePhase(
+        parsed.gameId,
+      );
+
+      await this.gameEventRecorder.recordEvent({
+        gameId: parsed.gameId,
+        type: 'PhaseChanged',
+        turn: transition.toTurn,
+        phase: transition.toPhase,
+        actorUserId: null,
+        payload: {
+          gameId: parsed.gameId,
+          fromPhase: transition.fromPhase,
+          toPhase: transition.toPhase,
+          turn: transition.toTurn,
+          requestedByUserId: user.id,
+        },
+        visibilityDuringGame: EventVisibility.PUBLIC,
+        visibilityAfterGame: EventVisibility.PUBLIC,
+        requestId: parsed.requestId,
+      });
+
+      const phaseChangedEvent: PhaseChangedEvent = {
+        type: 'phase:changed',
+        gameId: parsed.gameId,
+        fromPhase: transition.fromPhase,
+        toPhase: transition.toPhase,
+        turn: transition.toTurn,
+        requestedByUserId: user.id,
+        changedAt: new Date().toISOString(),
+      };
+
+      this.server.to(parsed.gameId).emit('phase:changed', phaseChangedEvent);
+      this.emitAccepted(client, parsed.requestId, parsed.type);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Phase transition failed.';
+      const reason =
+        message === 'game session not found'
+          ? 'GAME_SESSION_NOT_FOUND'
+          : message === 'game is finished'
+            ? 'GAME_ALREADY_FINISHED'
             : 'ROOM_COMMAND_FAILED';
 
       this.emitRoomRejected(client, parsed.requestId, reason, message);

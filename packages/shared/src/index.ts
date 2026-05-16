@@ -14,6 +14,7 @@ export type {
 export type {
   GameStartedEvent,
   PongEvent,
+  PhaseChangedEvent,
   RoleAssignedEvent,
   SocketUser,
   WhoamiEvent,
