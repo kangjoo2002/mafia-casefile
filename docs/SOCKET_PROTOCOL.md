@@ -88,3 +88,4 @@ requestId가 없는 command는 거부된다.
 - room join/leave
 - game command 처리
 - GameEvent 저장
+- 게임 command가 실제 상태 변경을 만들면 해당 결과는 `docs/EVENT_CATALOG.md`의 GameEvent 카탈로그를 기준으로 기록될 예정이다.

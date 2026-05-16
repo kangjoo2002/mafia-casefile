@@ -1,0 +1,90 @@
+# Event Catalog
+
+## 1. 목적
+
+- GameEvent는 게임 중 의미 있는 행동이 확정되었을 때 남기는 사건 기록이다.
+- GameEvent는 실시간 broadcast와 게임 종료 후 타임라인 복기의 기준이 된다.
+- Redis나 Socket.IO 이벤트는 전달 수단이며, 영구 사건 기록의 기준은 PostgreSQL `GameEventLog`다.
+- 실제 DB 모델과 저장 서비스는 이후 작업에서 구현한다.
+
+## 2. GameEvent 기본 원칙
+
+- 모든 사건은 `gameId`를 가진다.
+- 모든 사건은 `gameId` 안에서 증가하는 `seq`를 가진다.
+- 타임라인 정렬은 `createdAt`이 아니라 `seq` 기준이다.
+- 사건은 발생 당시 `turn`과 `phase`를 가진다.
+- 게임 중 공개 범위와 게임 종료 후 공개 범위를 분리한다.
+- `requestId`가 있는 command에서 발생한 사건은 `requestId`를 함께 저장한다.
+
+## 3. 공통 필드
+
+- `id`
+- `gameId`
+- `seq`
+- `type`
+- `turn`
+- `phase`
+- `actorUserId`
+- `payload`
+- `visibilityDuringGame`
+- `visibilityAfterGame`
+- `requestId`
+- `createdAt`
+
+아직 Prisma 모델은 만들지 않는다.
+
+## 4. 공개 범위
+
+- `PUBLIC`: 모든 참가자와 관전자에게 공개된다.
+- `PRIVATE`: 특정 사용자 또는 단일 대상에게만 공개된다.
+- `MAFIA_ONLY`: 마피아 진영에게만 공개된다.
+- `GHOST_ONLY`: 탈락한 플레이어 또는 관전자에게만 공개된다.
+- `SYSTEM_ONLY`: 클라이언트 UI에는 공개하지 않고 서버 운영용으로만 남긴다.
+
+## 5. 이벤트 카탈로그
+
+| Event type | 발생 시점 | actor | payload 예시 | 게임 중 공개 범위 | 게임 종료 후 공개 범위 | 비고 |
+| --- | --- | --- | --- | --- | --- | --- |
+| PlayerJoined | 방 참가가 확정될 때 | user | roomId, userId, nickname | PUBLIC | PUBLIC | 이후 room 기능과 연결 |
+| PlayerLeft | 방 나가기가 확정될 때 | user | roomId, userId, reason | PUBLIC | PUBLIC | 정상 종료와 강제 종료를 구분 가능 |
+| PlayerReadyChanged | 준비 상태 변경이 확정될 때 | user | userId, isReady | PUBLIC | PUBLIC | 게임 시작 전 상태 관리 |
+| GameStarted | 게임 시작이 확정될 때 | system | gameId, startedByUserId | PUBLIC | PUBLIC | 초기 상태 전환 기준 |
+| RoleAssigned | 역할 배정이 확정될 때 | system | userId, role | MAFIA_ONLY | PUBLIC | 게임 중에는 제한 공개 |
+| PhaseChanged | phase 전환이 확정될 때 | system | fromPhase, toPhase, turn | PUBLIC | PUBLIC | 타임라인 기준 이벤트 |
+| ChatMessageSent | 채팅 전송이 확정될 때 | user | channel, message | PUBLIC | PUBLIC | 이후 채팅 기능에서 사용 |
+| VoteCasted | 투표가 확정될 때 | user | targetUserId, voteType | PUBLIC | PUBLIC | 현재 표 상태의 근거 |
+| PlayerExecuted | 처형이 확정될 때 | system | targetUserId, voteResult | PUBLIC | PUBLIC | 낮 phase 결과 |
+| PlayerKilled | 사망이 확정될 때 | system | targetUserId, cause | PUBLIC | PUBLIC | 밤 phase 결과 |
+| MafiaTargetSelected | 마피아 타깃이 확정될 때 | user/system | targetUserId | MAFIA_ONLY | PUBLIC | 마피아 내부 선택 기록 |
+| DoctorTargetSelected | 의사 타깃이 확정될 때 | user/system | targetUserId | PRIVATE | PUBLIC | 개인 행동 기록 |
+| PoliceInvestigated | 경찰 조사 결과가 확정될 때 | user/system | targetUserId, result | PRIVATE | PUBLIC | 조사 결과를 개인에게만 노출 가능 |
+| PlayerDisconnected | 연결 끊김이 확정될 때 | system | userId, reason | SYSTEM_ONLY | PUBLIC | 세션 문제 추적용 |
+| SessionRecovered | 재연결 복구가 확정될 때 | system | userId, sessionId | SYSTEM_ONLY | PUBLIC | 중단 복구 추적용 |
+| GameFinished | 게임 종료가 확정될 때 | system | winnerTeam, reason | PUBLIC | PUBLIC | 최종 타임라인 마감 |
+
+## 6. Command/Event 매핑
+
+| Command | 생성되는 Event | requestId 필요 여부 | 상태 변경 여부 | 비고 |
+| --- | --- | --- | --- | --- |
+| JOIN_ROOM | PlayerJoined | yes | yes | 이후 room 참가 흐름 |
+| LEAVE_ROOM | PlayerLeft | yes | yes | 정상 종료 또는 이탈 |
+| CHANGE_READY | PlayerReadyChanged | yes | yes | 준비 상태 토글 |
+| START_GAME | GameStarted | yes | yes | 게임 시작 트리거 |
+| SEND_CHAT_MESSAGE | ChatMessageSent | yes | yes | 메시지 기록 |
+| CAST_VOTE | VoteCasted | yes | yes | 투표 확정 기록 |
+| SELECT_MAFIA_TARGET | MafiaTargetSelected | yes | yes | 마피아 전용 선택 |
+| SELECT_DOCTOR_TARGET | DoctorTargetSelected | yes | yes | 의사 전용 선택 |
+| SELECT_POLICE_TARGET | PoliceInvestigated | yes | yes | 경찰 조사 결과 기록 |
+| NEXT_PHASE | PhaseChanged | yes | yes | phase 전환 기록 |
+| FINISH_GAME | GameFinished | yes | yes | 종료 사유와 승리 진영 기록 |
+
+모든 command는 `requestId`가 필요하다.
+
+## 7. 아직 구현하지 않는 것
+
+- Prisma `GameEventLog` 모델
+- `GameEventRecorder`
+- `seq` 발급 로직
+- visibility 필터링 로직
+- timeline 조회 API
+- 실제 game command handler
