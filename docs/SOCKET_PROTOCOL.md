@@ -2,7 +2,7 @@
 
 ## 현재 범위
 
-현재 Socket.IO 프로토콜은 JWT handshake 인증, `ping` / `pong`, `whoami`, 그리고 공통 `command` envelope 검증과 `command:accepted` / `command:rejected` 응답을 제공한다.
+현재 Socket.IO 프로토콜은 JWT handshake 인증, `ping` / `pong`, `whoami`, 공통 `command` envelope 검증, `JOIN_ROOM` / `LEAVE_ROOM`, `room:updated` 브로드캐스트, 그리고 `command:accepted` / `command:rejected` 응답을 제공한다.
 
 ## 연결
 
@@ -39,6 +39,48 @@ io('http://localhost:3001', {
   "email": "user@example.com"
 }
 ```
+
+## room join / leave
+
+클라이언트는 `command` 이벤트로 room 참여와 나가기를 요청한다. room 참여 command는 envelope의 `gameId`를 room 식별자로 사용한다.
+
+```json
+{
+  "type": "JOIN_ROOM",
+  "requestId": "req-2",
+  "gameId": "room-123",
+  "payload": {
+    "nickname": "alpha"
+  }
+}
+```
+
+```json
+{
+  "type": "LEAVE_ROOM",
+  "requestId": "req-3",
+  "gameId": "room-123",
+  "payload": {}
+}
+```
+
+성공하면 서버는 `room:updated`로 room snapshot과 participant list를 broadcast하고, 해당 command를 `command:accepted`로 응답한다.
+
+```json
+{
+  "room": {
+    "roomId": "room-123",
+    "participants": [
+      {
+        "userId": "user-1",
+        "nickname": "alpha"
+      }
+    ]
+  }
+}
+```
+
+room이 없거나, 참여할 수 없거나, room 참가자가 아니면 `command:rejected`로 응답한다.
 
 ## command
 
@@ -85,7 +127,6 @@ requestId가 없는 command는 거부된다.
 
 ## 이후 확장 예정
 
-- room join/leave
 - game command 처리
 - GameEvent 저장
 - 게임 command가 실제 상태 변경을 만들면 해당 결과는 `docs/EVENT_CATALOG.md`의 GameEvent 카탈로그를 기준으로 기록될 예정이다.

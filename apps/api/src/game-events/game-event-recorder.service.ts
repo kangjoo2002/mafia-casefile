@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { EventVisibility, GameEventLog } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,7 +17,9 @@ export interface RecordEventInput {
 
 @Injectable()
 export class GameEventRecorderService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
 
   async recordEvent(input: RecordEventInput): Promise<GameEventLog> {
     return this.prisma.$transaction(async (tx) => {

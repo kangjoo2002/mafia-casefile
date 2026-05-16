@@ -3,6 +3,12 @@ import { randomUUID } from 'node:crypto';
 
 export type RoomStatus = 'WAITING' | 'IN_PROGRESS' | 'FINISHED';
 
+export interface RoomParticipant {
+  userId: string;
+  nickname: string;
+  joinedAt: Date;
+}
+
 export interface Room {
   roomId: string;
   name: string;
@@ -10,6 +16,7 @@ export interface Room {
   status: RoomStatus;
   playerCount: number;
   maxPlayers: number;
+  participants: RoomParticipant[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -26,6 +33,13 @@ function isNonEmptyString(value: unknown): value is string {
 
 function cloneRoom(room: Room): Room {
   return structuredClone(room);
+}
+
+function normalizeRoom(room: Room): Room {
+  return {
+    ...cloneRoom(room),
+    playerCount: room.participants.length,
+  };
 }
 
 @Injectable()
@@ -61,12 +75,20 @@ export class RoomsService {
       status: 'WAITING',
       playerCount: 1,
       maxPlayers,
+      participants: [
+        {
+          userId: input.hostUserId.trim(),
+          nickname: input.hostUserId.trim(),
+          joinedAt: now,
+        },
+      ],
       createdAt: now,
       updatedAt: now,
     };
 
-    this.rooms.set(room.roomId, cloneRoom(room));
-    return cloneRoom(room);
+    const snapshot = normalizeRoom(room);
+    this.rooms.set(room.roomId, snapshot);
+    return cloneRoom(snapshot);
   }
 
   listRooms(): Room[] {
@@ -81,6 +103,89 @@ export class RoomsService {
     }
 
     const room = this.rooms.get(roomId);
-    return room ? cloneRoom(room) : null;
+    return room ? cloneRoom(normalizeRoom(room)) : null;
+  }
+
+  joinRoom(
+    roomId: string,
+    participant: { userId: string; nickname: string },
+  ): Room {
+    if (!isNonEmptyString(roomId)) {
+      throw new BadRequestException('roomId is required');
+    }
+
+    if (!isNonEmptyString(participant?.userId)) {
+      throw new BadRequestException('userId is required');
+    }
+
+    if (!isNonEmptyString(participant?.nickname)) {
+      throw new BadRequestException('nickname is required');
+    }
+
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      throw new BadRequestException('room not found');
+    }
+
+    if (room.status !== 'WAITING') {
+      throw new BadRequestException('room is not joinable');
+    }
+
+    const now = new Date();
+    const existingIndex = room.participants.findIndex(
+      (current) => current.userId === participant.userId.trim(),
+    );
+
+    if (existingIndex >= 0) {
+      room.participants[existingIndex] = {
+        ...room.participants[existingIndex],
+        nickname: participant.nickname.trim(),
+      };
+    } else {
+      if (room.participants.length >= room.maxPlayers) {
+        throw new BadRequestException('room is full');
+      }
+
+      room.participants.push({
+        userId: participant.userId.trim(),
+        nickname: participant.nickname.trim(),
+        joinedAt: now,
+      });
+    }
+
+    room.updatedAt = now;
+    const snapshot = normalizeRoom(room);
+    this.rooms.set(roomId, snapshot);
+    return cloneRoom(snapshot);
+  }
+
+  leaveRoom(roomId: string, userId: string): Room {
+    if (!isNonEmptyString(roomId)) {
+      throw new BadRequestException('roomId is required');
+    }
+
+    if (!isNonEmptyString(userId)) {
+      throw new BadRequestException('userId is required');
+    }
+
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      throw new BadRequestException('room not found');
+    }
+
+    const participantIndex = room.participants.findIndex(
+      (participant) => participant.userId === userId.trim(),
+    );
+
+    if (participantIndex < 0) {
+      throw new BadRequestException('participant not found');
+    }
+
+    room.participants.splice(participantIndex, 1);
+    room.updatedAt = new Date();
+
+    const snapshot = normalizeRoom(room);
+    this.rooms.set(roomId, snapshot);
+    return cloneRoom(snapshot);
   }
 }

@@ -3,6 +3,8 @@ import { after, before, test } from 'node:test';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { JwtService } from '../auth/jwt.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { RoomsService } from '../rooms/rooms.service';
 import { RealtimeModule } from './realtime.module';
 import { io, Socket } from 'socket.io-client';
 
@@ -10,6 +12,7 @@ process.env.JWT_SECRET = 'test-secret';
 
 let app: Awaited<ReturnType<typeof NestFactory.create>>;
 let client: Socket | undefined;
+const prisma = new PrismaService();
 
 @Module({
   imports: [RealtimeModule],
@@ -105,7 +108,24 @@ async function sendCommandAndWait<T>(socket: Socket, command: unknown) {
   });
 }
 
+async function waitForEvent<T>(socket: Socket, eventName: string) {
+  return await new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.off(eventName, handler);
+      reject(new Error(`${eventName} timed out`));
+    }, 2000);
+
+    const handler = (message: T) => {
+      clearTimeout(timeout);
+      resolve(message);
+    };
+
+    socket.once(eventName, handler);
+  });
+}
+
 before(async () => {
+  await prisma.$connect();
   app = await NestFactory.create(RealtimeTestModule, {
     logger: false,
   });
@@ -115,6 +135,7 @@ before(async () => {
 
 after(async () => {
   client?.disconnect();
+  await prisma.$disconnect();
   await app.close();
 });
 
@@ -343,4 +364,186 @@ test('command envelope rejects missing payload', async () => {
   assert.equal(response.message, 'Command envelope is invalid.');
 
   socket.disconnect();
+});
+
+test('room join and leave broadcast participant updates and record events', async () => {
+  const jwtService = new JwtService();
+  const roomsService = app.get(RoomsService);
+
+  const hostToken = jwtService.signAccessToken({
+    id: 'room-host-user',
+    email: 'room-host@example.com',
+  });
+  const guestToken = jwtService.signAccessToken({
+    id: 'room-guest-user',
+    email: 'room-guest@example.com',
+  });
+
+  const room = roomsService.createRoom({
+    hostUserId: 'room-host-user',
+    name: 'room-join-leave',
+  });
+
+  const hostSocket = connectClient({ token: hostToken });
+  const guestSocket = connectClient({ token: guestToken });
+
+  await waitForConnect(hostSocket);
+  await waitForConnect(guestSocket);
+
+  const hostRoomUpdated = waitForEvent<{
+    room: {
+      roomId: string;
+      playerCount: number;
+      participants: Array<{ userId: string; nickname: string }>;
+    };
+  }>(hostSocket, 'room:updated');
+
+  const hostJoinResponse = sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(hostSocket, {
+    type: 'JOIN_ROOM',
+    requestId: 'req-room-join-1',
+    gameId: room.roomId,
+    payload: {
+      nickname: 'alpha',
+    },
+  });
+
+  const [hostJoinResponseMessage, hostRoomUpdatedMessage] = await Promise.all([
+    hostJoinResponse,
+    hostRoomUpdated,
+  ]);
+
+  assert.equal(hostJoinResponseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(hostJoinResponseMessage.requestId, 'req-room-join-1');
+  assert.equal(hostJoinResponseMessage.receivedType, 'JOIN_ROOM');
+  assert.equal(hostRoomUpdatedMessage.room.roomId, room.roomId);
+  assert.equal(hostRoomUpdatedMessage.room.playerCount, 1);
+  assert.deepEqual(
+    hostRoomUpdatedMessage.room.participants.map((participant) => participant.nickname),
+    ['alpha'],
+  );
+
+  const hostSeesGuestJoin = waitForEvent<{
+    room: {
+      roomId: string;
+      playerCount: number;
+      participants: Array<{ userId: string; nickname: string }>;
+    };
+  }>(hostSocket, 'room:updated');
+  const guestSeesGuestJoin = waitForEvent<{
+    room: {
+      roomId: string;
+      playerCount: number;
+      participants: Array<{ userId: string; nickname: string }>;
+    };
+  }>(guestSocket, 'room:updated');
+
+  const guestJoinResponse = sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(guestSocket, {
+    type: 'JOIN_ROOM',
+    requestId: 'req-room-join-2',
+    gameId: room.roomId,
+    payload: {
+      nickname: 'bravo',
+    },
+  });
+
+  const [guestJoinResponseMessage, hostGuestJoinUpdate, guestGuestJoinUpdate] =
+    await Promise.all([
+      guestJoinResponse,
+      hostSeesGuestJoin,
+      guestSeesGuestJoin,
+    ]);
+
+  assert.equal(guestJoinResponseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(guestJoinResponseMessage.requestId, 'req-room-join-2');
+  assert.equal(guestJoinResponseMessage.receivedType, 'JOIN_ROOM');
+  assert.equal(hostGuestJoinUpdate.room.playerCount, 2);
+  assert.equal(guestGuestJoinUpdate.room.playerCount, 2);
+  assert.deepEqual(
+    guestGuestJoinUpdate.room.participants.map((participant) => participant.nickname),
+    ['alpha', 'bravo'],
+  );
+
+  const hostSeesGuestLeave = waitForEvent<{
+    room: {
+      roomId: string;
+      playerCount: number;
+      participants: Array<{ userId: string; nickname: string }>;
+    };
+  }>(hostSocket, 'room:updated');
+
+  const leaveResponse = sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(guestSocket, {
+    type: 'LEAVE_ROOM',
+    requestId: 'req-room-leave-1',
+    gameId: room.roomId,
+    payload: {},
+  });
+
+  const [leaveResponseMessage, hostGuestLeaveUpdate] = await Promise.all([
+    leaveResponse,
+    hostSeesGuestLeave,
+  ]);
+
+  assert.equal(leaveResponseMessage.type, 'COMMAND_ACCEPTED');
+  assert.equal(leaveResponseMessage.requestId, 'req-room-leave-1');
+  assert.equal(leaveResponseMessage.receivedType, 'LEAVE_ROOM');
+  assert.equal(hostGuestLeaveUpdate.room.playerCount, 1);
+  assert.deepEqual(
+    hostGuestLeaveUpdate.room.participants.map((participant) => participant.nickname),
+    ['alpha'],
+  );
+
+  const storedRoom = roomsService.findRoomById(room.roomId);
+  assert.ok(storedRoom);
+  assert.equal(storedRoom?.playerCount, 1);
+  assert.deepEqual(
+    storedRoom?.participants.map((participant) => participant.nickname),
+    ['alpha'],
+  );
+
+  const events = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['PlayerJoined', 'PlayerJoined', 'PlayerLeft'],
+  );
+  assert.deepEqual(
+    events.map((event) => event.requestId),
+    ['req-room-join-1', 'req-room-join-2', 'req-room-leave-1'],
+  );
+
+  await prisma.gameEventLog
+    .deleteMany({
+      where: {
+        gameId: room.roomId,
+      },
+    })
+    .catch(() => undefined);
+
+  hostSocket.disconnect();
+  guestSocket.disconnect();
 });

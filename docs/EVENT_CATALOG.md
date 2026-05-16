@@ -11,6 +11,8 @@
 - `gameId`별 `seq`는 `recordEvent()`에서 발급한다.
 - `getTimeline(gameId)`는 `seq` 오름차순으로 사건을 조회한다.
 - visibility 필터링과 timeline API는 아직 구현하지 않는다.
+- `JOIN_ROOM` / `LEAVE_ROOM`은 room 참여 상태를 바꾸고 `PlayerJoined` / `PlayerLeft`를 남긴다.
+- room 참여 변경은 `room:updated` broadcast와 함께 반영된다.
 
 ## 2. GameEvent 기본 원칙
 
