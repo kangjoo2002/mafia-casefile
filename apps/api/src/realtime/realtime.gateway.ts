@@ -11,7 +11,13 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '../auth/jwt.service';
-import type { PongEvent, WhoamiEvent } from '@mafia-casefile/shared';
+import type {
+  CommandAcceptedEvent,
+  CommandRejectedEvent,
+  PongEvent,
+  WhoamiEvent,
+} from '@mafia-casefile/shared';
+import { parseCommandEnvelope } from './command-envelope';
 import { AuthenticatedSocket } from './socket-user';
 
 @WebSocketGateway({
@@ -79,6 +85,28 @@ export class RealtimeGateway
     };
 
     client.emit('pong', event);
+  }
+
+  @SubscribeMessage('command')
+  handleCommand(
+    @MessageBody() body: unknown,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const parsed = parseCommandEnvelope(body);
+
+    if ('reason' in parsed) {
+      const rejected: CommandRejectedEvent = parsed;
+      client.emit('command:rejected', rejected);
+      return;
+    }
+
+    const accepted: CommandAcceptedEvent = {
+      type: 'COMMAND_ACCEPTED',
+      requestId: parsed.requestId,
+      receivedType: parsed.type,
+    };
+
+    client.emit('command:accepted', accepted);
   }
 
   @SubscribeMessage('whoami')

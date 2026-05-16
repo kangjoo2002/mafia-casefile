@@ -80,6 +80,31 @@ async function waitForConnect(socket: Socket) {
   });
 }
 
+async function sendCommandAndWait<T>(socket: Socket, command: unknown) {
+  return await new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.disconnect();
+      reject(new Error('command response timed out'));
+    }, 2000);
+
+    const acceptedHandler = (message: T) => {
+      clearTimeout(timeout);
+      socket.off('command:rejected', rejectedHandler);
+      resolve(message);
+    };
+
+    const rejectedHandler = (message: T) => {
+      clearTimeout(timeout);
+      socket.off('command:accepted', acceptedHandler);
+      resolve(message);
+    };
+
+    socket.once('command:accepted', acceptedHandler);
+    socket.once('command:rejected', rejectedHandler);
+    socket.emit('command', command);
+  });
+}
+
 before(async () => {
   app = await NestFactory.create(RealtimeTestModule, {
     logger: false,
@@ -144,4 +169,178 @@ test('authenticated connection handles ping and whoami', async () => {
     id: 'user-id-123',
     email: 'user@example.com',
   });
+});
+
+test('command envelope accepts valid commands', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'user-id-456',
+    email: 'command-user@example.com',
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  const response = await sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType: string;
+  }>(socket, {
+    type: 'PING_COMMAND',
+    requestId: 'req-1',
+    gameId: 'game-1',
+    payload: {},
+  });
+
+  assert.equal(response.type, 'COMMAND_ACCEPTED');
+  assert.equal(response.requestId, 'req-1');
+  assert.equal(response.receivedType, 'PING_COMMAND');
+
+  socket.disconnect();
+});
+
+test('command envelope rejects missing requestId', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'user-id-789',
+    email: 'command-user-2@example.com',
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  const response = await sendCommandAndWait<{
+    type: string;
+    requestId?: string;
+    reason: string;
+    message: string;
+  }>(socket, {
+    type: 'PING_COMMAND',
+    gameId: 'game-1',
+    payload: {},
+  });
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.requestId, undefined);
+  assert.equal(response.reason, 'INVALID_COMMAND_ENVELOPE');
+  assert.equal(response.message, 'Command envelope is invalid.');
+
+  socket.disconnect();
+});
+
+test('command envelope rejects empty requestId', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'user-id-987',
+    email: 'command-user-3@example.com',
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  const response = await sendCommandAndWait<{
+    type: string;
+    requestId?: string;
+    reason: string;
+    message: string;
+  }>(socket, {
+    type: 'PING_COMMAND',
+    requestId: '',
+    gameId: 'game-1',
+    payload: {},
+  });
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.requestId, '');
+  assert.equal(response.reason, 'INVALID_COMMAND_ENVELOPE');
+  assert.equal(response.message, 'Command envelope is invalid.');
+
+  socket.disconnect();
+});
+
+test('command envelope rejects missing type', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'user-id-654',
+    email: 'command-user-4@example.com',
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  const response = await sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    reason: string;
+    message: string;
+  }>(socket, {
+    requestId: 'req-2',
+    gameId: 'game-1',
+    payload: {},
+  });
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.requestId, 'req-2');
+  assert.equal(response.reason, 'INVALID_COMMAND_ENVELOPE');
+  assert.equal(response.message, 'Command envelope is invalid.');
+
+  socket.disconnect();
+});
+
+test('command envelope rejects missing gameId', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'user-id-321',
+    email: 'command-user-5@example.com',
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  const response = await sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    reason: string;
+    message: string;
+  }>(socket, {
+    type: 'PING_COMMAND',
+    requestId: 'req-3',
+    payload: {},
+  });
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.requestId, 'req-3');
+  assert.equal(response.reason, 'INVALID_COMMAND_ENVELOPE');
+  assert.equal(response.message, 'Command envelope is invalid.');
+
+  socket.disconnect();
+});
+
+test('command envelope rejects missing payload', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'user-id-111',
+    email: 'command-user-6@example.com',
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  const response = await sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    reason: string;
+    message: string;
+  }>(socket, {
+    type: 'PING_COMMAND',
+    requestId: 'req-4',
+    gameId: 'game-1',
+  });
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.requestId, 'req-4');
+  assert.equal(response.reason, 'INVALID_COMMAND_ENVELOPE');
+  assert.equal(response.message, 'Command envelope is invalid.');
+
+  socket.disconnect();
 });
