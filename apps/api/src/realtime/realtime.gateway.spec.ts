@@ -124,6 +124,76 @@ async function waitForEvent<T>(socket: Socket, eventName: string) {
   });
 }
 
+function buildAuthedSocket(userId: string, email: string) {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: userId,
+    email,
+  });
+
+  const socket = connectClient({ token });
+  return { socket, jwtService, token };
+}
+
+function joinRoomCommand(
+  socket: Socket,
+  roomId: string,
+  nickname: string,
+  requestId: string,
+) {
+  return sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(socket, {
+    type: 'JOIN_ROOM',
+    requestId,
+    gameId: roomId,
+    payload: {
+      nickname,
+    },
+  });
+}
+
+function readyRoomCommand(
+  socket: Socket,
+  roomId: string,
+  isReady: boolean,
+  requestId: string,
+) {
+  return sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(socket, {
+    type: 'CHANGE_READY',
+    requestId,
+    gameId: roomId,
+    payload: {
+      isReady,
+    },
+  });
+}
+
+function startGameCommand(socket: Socket, roomId: string, requestId: string) {
+  return sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(socket, {
+    type: 'START_GAME',
+    requestId,
+    gameId: roomId,
+    payload: {},
+  });
+}
+
 before(async () => {
   await prisma.$connect();
   app = await NestFactory.create(RealtimeTestModule, {
@@ -731,4 +801,182 @@ test('room join and leave broadcast participant updates and record events', asyn
 
   hostSocket.disconnect();
   guestSocket.disconnect();
+});
+
+test('start game rejects when room is too small', async () => {
+  const roomsService = app.get(RoomsService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'small-room-host',
+    name: 'small-room',
+  });
+
+  const host = buildAuthedSocket('small-room-host', 'small-host@example.com');
+  const guest1 = buildAuthedSocket('small-room-guest-1', 'small-guest-1@example.com');
+  const guest2 = buildAuthedSocket('small-room-guest-2', 'small-guest-2@example.com');
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-small-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-small-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-small-join-3');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-small-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-small-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-small-ready-3');
+
+  const response = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-small-start-1',
+  );
+
+  assert.equal(response.type, 'COMMAND_REJECTED');
+  assert.equal(response.requestId, 'req-small-start-1');
+  assert.equal(response.reason, 'ROOM_TOO_SMALL');
+  assert.equal(response.message, 'room needs at least 4 players');
+
+  const storedRoom = roomsService.findRoomById(room.roomId);
+  assert.ok(storedRoom);
+  assert.equal(storedRoom?.status, 'WAITING');
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+});
+
+test('start game rejects non-host, requires all ready, and starts room', async () => {
+  const roomsService = app.get(RoomsService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'start-room-host',
+    name: 'start-room',
+  });
+
+  const host = buildAuthedSocket('start-room-host', 'start-host@example.com');
+  const guest1 = buildAuthedSocket('start-room-guest-1', 'start-guest-1@example.com');
+  const guest2 = buildAuthedSocket('start-room-guest-2', 'start-guest-2@example.com');
+  const guest3 = buildAuthedSocket('start-room-guest-3', 'start-guest-3@example.com');
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-start-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-start-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-start-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-start-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-start-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-start-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-start-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, false, 'req-start-ready-4');
+
+  const notReadyResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-start-attempt-1',
+  );
+
+  assert.equal(notReadyResponse.type, 'COMMAND_REJECTED');
+  assert.equal(notReadyResponse.requestId, 'req-start-attempt-1');
+  assert.equal(notReadyResponse.reason, 'ROOM_NOT_READY');
+  assert.equal(notReadyResponse.message, 'not all participants are ready');
+
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-start-ready-5');
+
+  const nonHostResponse = await startGameCommand(
+    guest1.socket,
+    room.roomId,
+    'req-start-attempt-2',
+  );
+
+  assert.equal(nonHostResponse.type, 'COMMAND_REJECTED');
+  assert.equal(nonHostResponse.requestId, 'req-start-attempt-2');
+  assert.equal(nonHostResponse.reason, 'NOT_ROOM_HOST');
+  assert.equal(nonHostResponse.message, 'only host can start game');
+
+  const hostSeesStart = waitForEvent<{
+    room: {
+      roomId: string;
+      status: string;
+      playerCount: number;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
+    };
+  }>(host.socket, 'room:updated');
+  const guestSeesStart = waitForEvent<{
+    room: {
+      roomId: string;
+      status: string;
+      playerCount: number;
+      participants: Array<{
+        userId: string;
+        nickname: string;
+        isReady: boolean;
+      }>;
+    };
+  }>(guest1.socket, 'room:updated');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-start-attempt-3',
+  );
+
+  const [hostStartUpdate, guestStartUpdate] = await Promise.all([
+    hostSeesStart,
+    guestSeesStart,
+  ]);
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+  assert.equal(startResponse.requestId, 'req-start-attempt-3');
+  assert.equal(startResponse.receivedType, 'START_GAME');
+  assert.equal(hostStartUpdate.room.status, 'IN_PROGRESS');
+  assert.equal(guestStartUpdate.room.status, 'IN_PROGRESS');
+  assert.equal(hostStartUpdate.room.playerCount, 4);
+  assert.deepEqual(
+    hostStartUpdate.room.participants.map((participant) => ({
+      nickname: participant.nickname,
+      isReady: participant.isReady,
+    })),
+    [
+      { nickname: 'host', isReady: true },
+      { nickname: 'g1', isReady: true },
+      { nickname: 'g2', isReady: true },
+      { nickname: 'g3', isReady: true },
+    ],
+  );
+
+  const storedRoom = roomsService.findRoomById(room.roomId);
+  assert.ok(storedRoom);
+  assert.equal(storedRoom?.status, 'IN_PROGRESS');
+  assert.equal(storedRoom?.playerCount, 4);
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
 });
