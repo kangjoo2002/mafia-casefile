@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { GameStartedEvent, RoleAssignedEvent } from '@mafia-casefile/shared';
 import { JwtService } from '../auth/jwt.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RoomsService } from '../rooms/rooms.service';
@@ -909,6 +910,31 @@ test('start game rejects non-host, requires all ready, and starts room', async (
   assert.equal(nonHostResponse.reason, 'NOT_ROOM_HOST');
   assert.equal(nonHostResponse.message, 'only host can start game');
 
+  const hostGameStarted = waitForEvent<GameStartedEvent>(
+    host.socket,
+    'game:started',
+  );
+  const guestGameStarted = waitForEvent<GameStartedEvent>(
+    guest1.socket,
+    'game:started',
+  );
+  const hostRoleAssigned = waitForEvent<RoleAssignedEvent>(
+    host.socket,
+    'role:assigned',
+  );
+  const guest1RoleAssigned = waitForEvent<RoleAssignedEvent>(
+    guest1.socket,
+    'role:assigned',
+  );
+  const guest2RoleAssigned = waitForEvent<RoleAssignedEvent>(
+    guest2.socket,
+    'role:assigned',
+  );
+  const guest3RoleAssigned = waitForEvent<RoleAssignedEvent>(
+    guest3.socket,
+    'role:assigned',
+  );
+
   const hostSeesStart = waitForEvent<{
     room: {
       roomId: string;
@@ -944,10 +970,26 @@ test('start game rejects non-host, requires all ready, and starts room', async (
     hostSeesStart,
     guestSeesStart,
   ]);
+  const [hostGameStartedEvent, guestGameStartedEvent] = await Promise.all([
+    hostGameStarted,
+    guestGameStarted,
+  ]);
+  const [hostRoleEvent, guest1RoleEvent, guest2RoleEvent, guest3RoleEvent] =
+    await Promise.all([
+      hostRoleAssigned,
+      guest1RoleAssigned,
+      guest2RoleAssigned,
+      guest3RoleAssigned,
+    ]);
 
   assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
   assert.equal(startResponse.requestId, 'req-start-attempt-3');
   assert.equal(startResponse.receivedType, 'START_GAME');
+  assert.equal(hostGameStartedEvent.type, 'game:started');
+  assert.equal(hostGameStartedEvent.gameId, room.roomId);
+  assert.equal(hostGameStartedEvent.startedByUserId, 'start-room-host');
+  assert.equal(hostGameStartedEvent.startedAt, guestGameStartedEvent.startedAt);
+  assert.equal(guestGameStartedEvent.gameId, room.roomId);
   assert.equal(hostStartUpdate.room.status, 'IN_PROGRESS');
   assert.equal(guestStartUpdate.room.status, 'IN_PROGRESS');
   assert.equal(hostStartUpdate.room.playerCount, 4);
@@ -963,11 +1005,89 @@ test('start game rejects non-host, requires all ready, and starts room', async (
       { nickname: 'g3', isReady: true },
     ],
   );
+  assert.deepEqual(
+    [
+      hostRoleEvent.userId,
+      guest1RoleEvent.userId,
+      guest2RoleEvent.userId,
+      guest3RoleEvent.userId,
+    ].sort(),
+    [
+      'start-room-host',
+      'start-room-guest-1',
+      'start-room-guest-2',
+      'start-room-guest-3',
+    ].sort(),
+  );
+  assert.deepEqual(
+    [
+      hostRoleEvent.role,
+      guest1RoleEvent.role,
+      guest2RoleEvent.role,
+      guest3RoleEvent.role,
+    ].sort(),
+    ['CITIZEN', 'DOCTOR', 'MAFIA', 'POLICE'].sort(),
+  );
 
   const storedRoom = roomsService.findRoomById(room.roomId);
   assert.ok(storedRoom);
   assert.equal(storedRoom?.status, 'IN_PROGRESS');
   assert.equal(storedRoom?.playerCount, 4);
+
+  const events = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.deepEqual(
+    events.map((event) => event.type),
+    [
+      'PlayerJoined',
+      'PlayerJoined',
+      'PlayerJoined',
+      'PlayerJoined',
+      'PlayerReadyChanged',
+      'PlayerReadyChanged',
+      'PlayerReadyChanged',
+      'PlayerReadyChanged',
+      'PlayerReadyChanged',
+      'GameStarted',
+      'RoleAssigned',
+      'RoleAssigned',
+      'RoleAssigned',
+      'RoleAssigned',
+    ],
+  );
+  assert.deepEqual(
+    events.map((event) => event.requestId),
+    [
+      'req-start-join-1',
+      'req-start-join-2',
+      'req-start-join-3',
+      'req-start-join-4',
+      'req-start-ready-1',
+      'req-start-ready-2',
+      'req-start-ready-3',
+      'req-start-ready-4',
+      'req-start-ready-5',
+      'req-start-attempt-3',
+      'req-start-attempt-3',
+      'req-start-attempt-3',
+      'req-start-attempt-3',
+      'req-start-attempt-3',
+    ],
+  );
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === 'RoleAssigned')
+      .map((event) => (event.payload as { role: string }).role)
+      .sort(),
+    ['CITIZEN', 'DOCTOR', 'MAFIA', 'POLICE'].sort(),
+  );
 
   await prisma.gameEventLog.deleteMany({
     where: {

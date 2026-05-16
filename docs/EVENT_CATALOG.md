@@ -12,6 +12,7 @@
 - `getTimeline(gameId)`는 `seq` 오름차순으로 사건을 조회한다.
 - visibility 필터링과 timeline API는 아직 구현하지 않는다.
 - `JOIN_ROOM` / `LEAVE_ROOM`은 room 참여 상태를 바꾸고 `PlayerJoined` / `PlayerLeft`를 남긴다.
+- `START_GAME`은 `GameStarted`와 `RoleAssigned`를 남기고, 역할은 개인에게만 전송된다.
 - room 참여 변경은 `room:updated` broadcast와 함께 반영된다.
 
 ## 2. GameEvent 기본 원칙
@@ -56,7 +57,7 @@
 | PlayerLeft | 방 나가기가 확정될 때 | user | roomId, userId, reason | PUBLIC | PUBLIC | 정상 종료와 강제 종료를 구분 가능 |
 | PlayerReadyChanged | 준비 상태 변경이 확정될 때 | user | userId, isReady | PUBLIC | PUBLIC | 게임 시작 전 상태 관리 |
 | GameStarted | 게임 시작이 확정될 때 | system | gameId, startedByUserId | PUBLIC | PUBLIC | 초기 상태 전환 기준 |
-| RoleAssigned | 역할 배정이 확정될 때 | system | userId, role | MAFIA_ONLY | PUBLIC | 게임 중에는 제한 공개 |
+| RoleAssigned | 역할 배정이 확정될 때 | system | userId, role | PRIVATE | PUBLIC | 각 사용자에게 개인 전달 |
 | PhaseChanged | phase 전환이 확정될 때 | system | fromPhase, toPhase, turn | PUBLIC | PUBLIC | 타임라인 기준 이벤트 |
 | ChatMessageSent | 채팅 전송이 확정될 때 | user | channel, message | PUBLIC | PUBLIC | 이후 채팅 기능에서 사용 |
 | VoteCasted | 투표가 확정될 때 | user | targetUserId, voteType | PUBLIC | PUBLIC | 현재 표 상태의 근거 |
@@ -76,7 +77,7 @@
 | JOIN_ROOM | PlayerJoined | yes | yes | 이후 room 참가 흐름 |
 | LEAVE_ROOM | PlayerLeft | yes | yes | 정상 종료 또는 이탈 |
 | CHANGE_READY | PlayerReadyChanged | yes | yes | 준비 상태 토글 |
-| START_GAME | GameStarted | yes | yes | 게임 시작 트리거 |
+| START_GAME | GameStarted / RoleAssigned | yes | yes | 게임 시작 및 역할 배정 |
 | SEND_CHAT_MESSAGE | ChatMessageSent | yes | yes | 메시지 기록 |
 | CAST_VOTE | VoteCasted | yes | yes | 투표 확정 기록 |
 | SELECT_MAFIA_TARGET | MafiaTargetSelected | yes | yes | 마피아 전용 선택 |
