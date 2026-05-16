@@ -238,6 +238,28 @@ function nightActionCommand(
   });
 }
 
+function voteCommand(
+  socket: Socket,
+  roomId: string,
+  targetUserId: string,
+  requestId: string,
+) {
+  return sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(socket, {
+    type: 'CAST_VOTE',
+    requestId,
+    gameId: roomId,
+    payload: {
+      targetUserId,
+    },
+  });
+}
+
 before(async () => {
   await prisma.$connect();
   app = await NestFactory.create(RealtimeTestModule, {
@@ -1503,6 +1525,137 @@ test('night actions require the right role and record selections', async () => {
   assert.equal(notNightResponse.type, 'COMMAND_REJECTED');
   assert.equal(notNightResponse.reason, 'GAME_NOT_IN_NIGHT');
   assert.equal(notNightResponse.message, 'night actions are only allowed during NIGHT');
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('cast vote records one vote per user and deduplicates request ids', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'vote-room-host',
+    name: 'vote-room',
+  });
+
+  const host = buildAuthedSocket('vote-room-host', 'vote-host@example.com');
+  const guest1 = buildAuthedSocket('vote-room-guest-1', 'vote-guest-1@example.com');
+  const guest2 = buildAuthedSocket('vote-room-guest-2', 'vote-guest-2@example.com');
+  const guest3 = buildAuthedSocket('vote-room-guest-3', 'vote-guest-3@example.com');
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-vote-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-vote-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-vote-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-vote-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-vote-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-vote-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-vote-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-vote-ready-4');
+
+  await startGameCommand(host.socket, room.roomId, 'req-vote-start-1');
+  await nextPhaseCommand(host.socket, room.roomId, 'req-vote-next-1');
+  await nextPhaseCommand(host.socket, room.roomId, 'req-vote-next-2');
+
+  const votingSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(votingSession);
+  assert.equal(votingSession?.phase, 'VOTING');
+
+  const voteTargetUserId = 'vote-room-guest-1';
+  const firstVote = await voteCommand(
+    host.socket,
+    room.roomId,
+    voteTargetUserId,
+    'req-vote-1',
+  );
+  const secondVote = await voteCommand(
+    guest2.socket,
+    room.roomId,
+    voteTargetUserId,
+    'req-vote-2',
+  );
+  const thirdVote = await voteCommand(
+    guest3.socket,
+    room.roomId,
+    'vote-room-host',
+    'req-vote-3',
+  );
+
+  assert.equal(firstVote.type, 'COMMAND_ACCEPTED');
+  assert.equal(secondVote.type, 'COMMAND_ACCEPTED');
+  assert.equal(thirdVote.type, 'COMMAND_ACCEPTED');
+
+  const duplicateRequestVote = await voteCommand(
+    host.socket,
+    room.roomId,
+    voteTargetUserId,
+    'req-vote-1',
+  );
+
+  assert.equal(duplicateRequestVote.type, 'COMMAND_ACCEPTED');
+  assert.equal(duplicateRequestVote.requestId, 'req-vote-1');
+
+  const repeatedVote = await voteCommand(
+    host.socket,
+    room.roomId,
+    voteTargetUserId,
+    'req-vote-4',
+  );
+
+  assert.equal(repeatedVote.type, 'COMMAND_REJECTED');
+  assert.equal(repeatedVote.reason, 'VOTE_ALREADY_CAST');
+  assert.equal(repeatedVote.message, 'vote already cast');
+
+  const storedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(storedSession);
+  assert.deepEqual(storedSession?.votes, {
+    'vote-room-host': voteTargetUserId,
+    'vote-room-guest-2': voteTargetUserId,
+    'vote-room-guest-3': 'vote-room-host',
+  });
+  assert.equal(storedSession?.processedRequests['req-vote-1'], voteTargetUserId);
+
+  const tally = gameSessionService.calculateVoteTally(storedSession!);
+  assert.deepEqual(tally, [
+    { targetUserId: voteTargetUserId, count: 2 },
+    { targetUserId: 'vote-room-host', count: 1 },
+  ]);
+
+  const voteEvents = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: 'VoteCasted',
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.equal(voteEvents.length, 3);
+  assert.deepEqual(
+    voteEvents.map((event) => event.requestId),
+    ['req-vote-1', 'req-vote-2', 'req-vote-3'],
+  );
+  assert.deepEqual(
+    voteEvents.map((event) => event.actorUserId),
+    ['vote-room-host', 'vote-room-guest-2', 'vote-room-guest-3'],
+  );
 
   await prisma.gameEventLog.deleteMany({
     where: {

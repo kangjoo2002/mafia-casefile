@@ -21,6 +21,14 @@
 - `SELECT_POLICE_TARGET`는 살아있는 경찰만 사용할 수 있다.
 - 밤 액션 결과는 `GameSession.nightActions`에 반영되고, `GameEventLog`에도 기록된다.
 
+## 투표
+
+- `CAST_VOTE`는 `VOTING` phase에서만 허용된다.
+- 살아있는 유저만 투표할 수 있다.
+- 한 유저는 한 투표 턴에 한 번만 투표할 수 있다.
+- 같은 `requestId`의 재전송은 1차 중복 차단 대상으로 처리된다.
+- 투표 결과는 `GameSession.votes`와 `GameEventLog`의 `VoteCasted` 사건으로 추적한다.
+
 ## 검증 원칙
 
 - `NEXT_PHASE`는 현재 game session의 phase에 따라만 허용된다.
