@@ -5,7 +5,9 @@
 - GameEvent는 게임 중 의미 있는 행동이 확정되었을 때 남기는 사건 기록이다.
 - GameEvent는 실시간 broadcast와 게임 종료 후 타임라인 복기의 기준이 된다.
 - Redis나 Socket.IO 이벤트는 전달 수단이며, 영구 사건 기록의 기준은 PostgreSQL `GameEventLog`다.
-- 실제 DB 모델과 저장 서비스는 이후 작업에서 구현한다.
+- 이 카탈로그의 이벤트는 이후 `GameEventLog.type`으로 저장된다.
+- `gameId + seq`가 타임라인 정렬 기준이다.
+- 실제 기록 서비스는 다음 작업에서 구현한다.
 
 ## 2. GameEvent 기본 원칙
 
@@ -31,7 +33,7 @@
 - `requestId`
 - `createdAt`
 
-아직 Prisma 모델은 만들지 않는다.
+위 필드는 Prisma `GameEventLog` 모델에 반영되어 있다.
 
 ## 4. 공개 범위
 
@@ -82,9 +84,10 @@
 
 ## 7. 아직 구현하지 않는 것
 
-- Prisma `GameEventLog` 모델
 - `GameEventRecorder`
 - `seq` 발급 로직
 - visibility 필터링 로직
 - timeline 조회 API
 - 실제 game command handler
+
+Prisma `GameEventLog` 모델은 추가되었지만, 실제 기록 서비스와 조회 API는 아직 구현하지 않는다.

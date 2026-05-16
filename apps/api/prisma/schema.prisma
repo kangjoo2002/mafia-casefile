@@ -6,6 +6,14 @@ datasource db {
   provider = "postgresql"
 }
 
+enum EventVisibility {
+  PUBLIC
+  PRIVATE
+  MAFIA_ONLY
+  GHOST_ONLY
+  SYSTEM_ONLY
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -15,4 +23,25 @@ model User {
   updatedAt    DateTime @updatedAt
 
   @@map("users")
+}
+
+model GameEventLog {
+  id                  String           @id @default(cuid())
+  gameId              String
+  seq                 Int
+  type                String
+  turn                Int
+  phase               String
+  actorUserId         String?
+  payload             Json
+  visibilityDuringGame EventVisibility
+  visibilityAfterGame  EventVisibility
+  requestId           String?
+  createdAt           DateTime         @default(now())
+
+  @@unique([gameId, seq])
+  @@index([gameId, requestId])
+  @@index([gameId, type])
+  @@index([gameId, createdAt])
+  @@map("game_event_logs")
 }
