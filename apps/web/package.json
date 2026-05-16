@@ -9,6 +9,7 @@
     "test": "node -e \"process.exit(0)\""
   },
   "dependencies": {
+    "@mafia-casefile/shared": "workspace:*",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest"

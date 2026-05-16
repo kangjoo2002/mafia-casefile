@@ -11,6 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '../auth/jwt.service';
+import type { PongEvent, WhoamiEvent } from '@mafia-casefile/shared';
 import { AuthenticatedSocket } from './socket-user';
 
 @WebSocketGateway({
@@ -72,16 +73,19 @@ export class RealtimeGateway
     @MessageBody() _body: unknown,
     @ConnectedSocket() client: Socket,
   ) {
-    client.emit('pong', {
+    const event: PongEvent = {
       type: 'pong',
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    client.emit('pong', event);
   }
 
   @SubscribeMessage('whoami')
   handleWhoami(@ConnectedSocket() client: Socket) {
     const authedClient = client as AuthenticatedSocket;
+    const event = authedClient.data.user as WhoamiEvent | undefined;
 
-    client.emit('whoami', authedClient.data.user);
+    client.emit('whoami', event);
   }
 }

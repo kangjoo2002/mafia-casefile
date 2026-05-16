@@ -1,9 +1,5 @@
 import { Socket } from 'socket.io';
-
-export interface SocketUser {
-  id: string;
-  email: string;
-}
+import type { SocketUser } from '@mafia-casefile/shared';
 
 export interface AuthenticatedSocketData {
   user?: SocketUser;

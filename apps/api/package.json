@@ -16,6 +16,7 @@
     "prisma:seed": "prisma db seed"
   },
   "dependencies": {
+    "@mafia-casefile/shared": "workspace:*",
     "@nestjs/common": "latest",
     "@nestjs/core": "latest",
     "@nestjs/platform-express": "latest",

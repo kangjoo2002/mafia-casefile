@@ -10,6 +10,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@mafia-casefile/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@nestjs/common':
         specifier: latest
         version: 11.1.21(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -80,6 +83,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@mafia-casefile/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       next:
         specifier: latest
         version: 16.2.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -99,6 +105,12 @@ importers:
       '@types/react-dom':
         specifier: latest
         version: 19.2.3(@types/react@19.2.14)
+      typescript:
+        specifier: latest
+        version: 6.0.3
+
+  packages/shared:
+    devDependencies:
       typescript:
         specifier: latest
         version: 6.0.3
