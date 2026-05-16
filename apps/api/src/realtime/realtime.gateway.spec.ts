@@ -215,6 +215,29 @@ function nextPhaseCommand(socket: Socket, roomId: string, requestId: string) {
   });
 }
 
+function nightActionCommand(
+  socket: Socket,
+  type: 'SELECT_MAFIA_TARGET' | 'SELECT_DOCTOR_TARGET' | 'SELECT_POLICE_TARGET',
+  roomId: string,
+  targetUserId: string,
+  requestId: string,
+) {
+  return sendCommandAndWait<{
+    type: string;
+    requestId: string;
+    receivedType?: string;
+    reason?: string;
+    message?: string;
+  }>(socket, {
+    type,
+    requestId,
+    gameId: roomId,
+    payload: {
+      targetUserId,
+    },
+  });
+}
+
 before(async () => {
   await prisma.$connect();
   app = await NestFactory.create(RealtimeTestModule, {
@@ -1267,6 +1290,219 @@ test('next phase advances the session and broadcasts phase changes', async () =>
     events.map((event) => (event.payload as { toPhase: string }).toPhase),
     transitions.map((transition) => transition.toPhase),
   );
+
+  await prisma.gameEventLog.deleteMany({
+    where: {
+      gameId: room.roomId,
+    },
+  });
+
+  host.socket.disconnect();
+  guest1.socket.disconnect();
+  guest2.socket.disconnect();
+  guest3.socket.disconnect();
+});
+
+test('night actions require the right role and record selections', async () => {
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'night-room-host',
+    name: 'night-room',
+  });
+
+  const host = buildAuthedSocket('night-room-host', 'night-host@example.com');
+  const guest1 = buildAuthedSocket('night-room-guest-1', 'night-guest-1@example.com');
+  const guest2 = buildAuthedSocket('night-room-guest-2', 'night-guest-2@example.com');
+  const guest3 = buildAuthedSocket('night-room-guest-3', 'night-guest-3@example.com');
+
+  await Promise.all([
+    waitForConnect(host.socket),
+    waitForConnect(guest1.socket),
+    waitForConnect(guest2.socket),
+    waitForConnect(guest3.socket),
+  ]);
+
+  await joinRoomCommand(host.socket, room.roomId, 'host', 'req-night-join-1');
+  await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-night-join-2');
+  await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-night-join-3');
+  await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-night-join-4');
+
+  await readyRoomCommand(host.socket, room.roomId, true, 'req-night-ready-1');
+  await readyRoomCommand(guest1.socket, room.roomId, true, 'req-night-ready-2');
+  await readyRoomCommand(guest2.socket, room.roomId, true, 'req-night-ready-3');
+  await readyRoomCommand(guest3.socket, room.roomId, true, 'req-night-ready-4');
+
+  const startResponse = await startGameCommand(
+    host.socket,
+    room.roomId,
+    'req-night-start-1',
+  );
+
+  assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+  assert.equal(startResponse.receivedType, 'START_GAME');
+
+  const startedSession = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(startedSession);
+
+  const socketsByUserId = new Map<string, Socket>([
+    ['night-room-host', host.socket],
+    ['night-room-guest-1', guest1.socket],
+    ['night-room-guest-2', guest2.socket],
+    ['night-room-guest-3', guest3.socket],
+  ]);
+
+  const mafiaPlayer = startedSession?.players.find(
+    (player) => player.role === 'MAFIA',
+  );
+  const doctorPlayer = startedSession?.players.find(
+    (player) => player.role === 'DOCTOR',
+  );
+  const policePlayer = startedSession?.players.find(
+    (player) => player.role === 'POLICE',
+  );
+  const citizenPlayer = startedSession?.players.find(
+    (player) => player.role === 'CITIZEN',
+  );
+
+  assert.ok(mafiaPlayer);
+  assert.ok(doctorPlayer);
+  assert.ok(policePlayer);
+  assert.ok(citizenPlayer);
+
+  const mafiaSocket = socketsByUserId.get(mafiaPlayer.userId);
+  const doctorSocket = socketsByUserId.get(doctorPlayer.userId);
+  const policeSocket = socketsByUserId.get(policePlayer.userId);
+  const citizenSocket = socketsByUserId.get(citizenPlayer.userId);
+
+  assert.ok(mafiaSocket);
+  assert.ok(doctorSocket);
+  assert.ok(policeSocket);
+  assert.ok(citizenSocket);
+
+  const rejected = await nightActionCommand(
+    citizenSocket,
+    'SELECT_MAFIA_TARGET',
+    room.roomId,
+    doctorPlayer.userId,
+    'req-night-reject-1',
+  );
+
+  assert.equal(rejected.type, 'COMMAND_REJECTED');
+  assert.equal(rejected.requestId, 'req-night-reject-1');
+  assert.equal(rejected.reason, 'ROLE_NOT_ALLOWED');
+  assert.equal(rejected.message, 'role not allowed');
+
+  const mafiaTargetResponse = await nightActionCommand(
+    mafiaSocket,
+    'SELECT_MAFIA_TARGET',
+    room.roomId,
+    doctorPlayer.userId,
+    'req-night-mafia-1',
+  );
+  const doctorTargetResponse = await nightActionCommand(
+    doctorSocket,
+    'SELECT_DOCTOR_TARGET',
+    room.roomId,
+    mafiaPlayer.userId,
+    'req-night-doctor-1',
+  );
+  const policeTargetResponse = await nightActionCommand(
+    policeSocket,
+    'SELECT_POLICE_TARGET',
+    room.roomId,
+    mafiaPlayer.userId,
+    'req-night-police-1',
+  );
+
+  assert.equal(mafiaTargetResponse.type, 'COMMAND_ACCEPTED');
+  assert.equal(doctorTargetResponse.type, 'COMMAND_ACCEPTED');
+  assert.equal(policeTargetResponse.type, 'COMMAND_ACCEPTED');
+
+  const sessionAfterActions = await gameSessionService.findByGameId(room.roomId);
+  assert.ok(sessionAfterActions);
+  assert.equal(
+    sessionAfterActions?.nightActions.mafiaTarget,
+    doctorPlayer.userId,
+  );
+  assert.equal(
+    sessionAfterActions?.nightActions.doctorTarget,
+    mafiaPlayer.userId,
+  );
+  assert.equal(
+    sessionAfterActions?.nightActions.policeTarget,
+    mafiaPlayer.userId,
+  );
+
+  const nightEvents = await prisma.gameEventLog.findMany({
+    where: {
+      gameId: room.roomId,
+      type: {
+        in: ['MafiaTargetSelected', 'DoctorTargetSelected', 'PoliceInvestigated'],
+      },
+    },
+    orderBy: {
+      seq: 'asc',
+    },
+  });
+
+  assert.deepEqual(
+    nightEvents.map((event) => event.type),
+    ['MafiaTargetSelected', 'DoctorTargetSelected', 'PoliceInvestigated'],
+  );
+  assert.deepEqual(
+    nightEvents.map((event) => event.requestId),
+    ['req-night-mafia-1', 'req-night-doctor-1', 'req-night-police-1'],
+  );
+  assert.deepEqual(
+    nightEvents.map((event) => event.visibilityDuringGame),
+    ['MAFIA_ONLY', 'PRIVATE', 'PRIVATE'],
+  );
+  assert.deepEqual(
+    nightEvents.map((event) => event.visibilityAfterGame),
+    ['PUBLIC', 'PUBLIC', 'PUBLIC'],
+  );
+  assert.equal(
+    (nightEvents[0]?.payload as { targetUserId?: string } | undefined)
+      ?.targetUserId,
+    doctorPlayer.userId,
+  );
+  assert.equal(
+    (nightEvents[1]?.payload as { targetUserId?: string } | undefined)
+      ?.targetUserId,
+    mafiaPlayer.userId,
+  );
+  assert.equal(
+    (nightEvents[2]?.payload as { targetUserId?: string; result?: string } | undefined)
+      ?.targetUserId,
+    mafiaPlayer.userId,
+  );
+  assert.equal(
+    (nightEvents[2]?.payload as { targetUserId?: string; result?: string } | undefined)
+      ?.result,
+    'MAFIA',
+  );
+
+  const phaseResponse = await nextPhaseCommand(
+    host.socket,
+    room.roomId,
+    'req-night-next-1',
+  );
+  assert.equal(phaseResponse.type, 'COMMAND_ACCEPTED');
+  assert.equal(phaseResponse.receivedType, 'NEXT_PHASE');
+
+  const notNightResponse = await nightActionCommand(
+    mafiaSocket,
+    'SELECT_MAFIA_TARGET',
+    room.roomId,
+    policePlayer.userId,
+    'req-night-reject-2',
+  );
+
+  assert.equal(notNightResponse.type, 'COMMAND_REJECTED');
+  assert.equal(notNightResponse.reason, 'GAME_NOT_IN_NIGHT');
+  assert.equal(notNightResponse.message, 'night actions are only allowed during NIGHT');
 
   await prisma.gameEventLog.deleteMany({
     where: {

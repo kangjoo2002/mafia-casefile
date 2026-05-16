@@ -38,6 +38,10 @@ type RoomReadyCommandPayload = {
 
 type RoomStartCommandPayload = Record<string, never>;
 
+type NightTargetCommandPayload = {
+  targetUserId?: unknown;
+};
+
 type RoomUpdatedEvent = {
   room: Room;
 };
@@ -174,6 +178,21 @@ export class RealtimeGateway
 
     if (parsed.type === 'NEXT_PHASE') {
       await this.handleNextPhase(parsed, client);
+      return;
+    }
+
+    if (parsed.type === 'SELECT_MAFIA_TARGET') {
+      await this.handleSelectMafiaTarget(parsed, client);
+      return;
+    }
+
+    if (parsed.type === 'SELECT_DOCTOR_TARGET') {
+      await this.handleSelectDoctorTarget(parsed, client);
+      return;
+    }
+
+    if (parsed.type === 'SELECT_POLICE_TARGET') {
+      await this.handleSelectPoliceTarget(parsed, client);
       return;
     }
 
@@ -656,6 +675,146 @@ export class RealtimeGateway
           : message === 'game is finished'
             ? 'GAME_ALREADY_FINISHED'
             : 'ROOM_COMMAND_FAILED';
+
+      this.emitRoomRejected(client, parsed.requestId, reason, message);
+    }
+  }
+
+  private async handleSelectMafiaTarget(
+    parsed: RoomCommandEnvelope,
+    client: Socket,
+  ) {
+    await this.handleNightTargetCommand(parsed, client, 'mafia');
+  }
+
+  private async handleSelectDoctorTarget(
+    parsed: RoomCommandEnvelope,
+    client: Socket,
+  ) {
+    await this.handleNightTargetCommand(parsed, client, 'doctor');
+  }
+
+  private async handleSelectPoliceTarget(
+    parsed: RoomCommandEnvelope,
+    client: Socket,
+  ) {
+    await this.handleNightTargetCommand(parsed, client, 'police');
+  }
+
+  private async handleNightTargetCommand(
+    parsed: RoomCommandEnvelope,
+    client: Socket,
+    action: 'mafia' | 'doctor' | 'police',
+  ) {
+    const authedClient = client as AuthenticatedSocket;
+    const user = authedClient.data.user;
+
+    if (!user) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'UNAUTHORIZED',
+        'Socket user is missing.',
+      );
+      return;
+    }
+
+    if (
+      typeof parsed.payload !== 'object' ||
+      parsed.payload === null ||
+      Array.isArray(parsed.payload)
+    ) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'INVALID_ROOM_COMMAND',
+        'Room command payload is invalid.',
+      );
+      return;
+    }
+
+    const payload = parsed.payload as NightTargetCommandPayload;
+
+    if (!isNonEmptyString(payload.targetUserId)) {
+      this.emitRoomRejected(
+        client,
+        parsed.requestId,
+        'INVALID_ROOM_COMMAND',
+        'Night target user is required.',
+      );
+      return;
+    }
+
+    try {
+      const selection =
+        action === 'mafia'
+          ? await this.gameSessionService.selectMafiaTarget(
+              parsed.gameId,
+              user.id,
+              payload.targetUserId,
+            )
+          : action === 'doctor'
+            ? await this.gameSessionService.selectDoctorTarget(
+                parsed.gameId,
+                user.id,
+                payload.targetUserId,
+              )
+            : await this.gameSessionService.selectPoliceTarget(
+                parsed.gameId,
+                user.id,
+                payload.targetUserId,
+              );
+
+      const eventType =
+        action === 'mafia'
+          ? 'MafiaTargetSelected'
+          : action === 'doctor'
+            ? 'DoctorTargetSelected'
+            : 'PoliceInvestigated';
+      const visibilityDuringGame =
+        action === 'mafia'
+          ? EventVisibility.MAFIA_ONLY
+          : EventVisibility.PRIVATE;
+      const eventPayload =
+        action === 'police'
+          ? {
+              targetUserId: selection.target.userId,
+              result: selection.target.role,
+            }
+          : {
+              targetUserId: selection.target.userId,
+            };
+
+      await this.gameEventRecorder.recordEvent({
+        gameId: parsed.gameId,
+        type: eventType,
+        turn: selection.session.turn,
+        phase: selection.session.phase,
+        actorUserId: user.id,
+        payload: eventPayload,
+        visibilityDuringGame,
+        visibilityAfterGame: EventVisibility.PUBLIC,
+        requestId: parsed.requestId,
+      });
+
+      this.emitAccepted(client, parsed.requestId, parsed.type);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Night action failed.';
+      const reason =
+        message === 'game session not found'
+          ? 'GAME_SESSION_NOT_FOUND'
+          : message === 'night actions are only allowed during NIGHT'
+            ? 'GAME_NOT_IN_NIGHT'
+            : message === 'actor not found'
+              ? 'PLAYER_NOT_IN_GAME'
+              : message === 'dead player cannot act'
+                ? 'PLAYER_NOT_ALIVE'
+                : message === 'role not allowed'
+                  ? 'ROLE_NOT_ALLOWED'
+                  : message === 'target player not found'
+                    ? 'TARGET_PLAYER_NOT_FOUND'
+                    : 'ROOM_COMMAND_FAILED';
 
       this.emitRoomRejected(client, parsed.requestId, reason, message);
     }
