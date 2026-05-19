@@ -15,6 +15,7 @@
     "test:game-event-timeline": "node --import tsx --test src/game-events/game-events.controller.spec.ts",
     "test:game-session-redis": "node --import tsx --test src/game-session/redis-game-session.repository.spec.ts",
     "test:game-session-module": "node --import tsx --test src/game-session/game-session.module.spec.ts",
+    "test:game-session-disconnect": "node --import tsx --test src/game-session/game-session.disconnect.spec.ts",
     "test:game-e2e": "node --import tsx --test src/realtime/realtime.game-flow.e2e-spec.ts",
     "test:game-session": "node --import tsx --test src/game-session/game-session.repository.spec.ts",
     "test:game-command-lock": "node --import tsx --test src/realtime/game-command-lock.service.spec.ts",

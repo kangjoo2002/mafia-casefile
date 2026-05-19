@@ -21,6 +21,7 @@
 - `updatedAt`
 
 `players`에는 `userId`, `nickname`, `role`, `status`, `connectionStatus`, `lastSeenAt`이 들어간다.
+`connectionStatus`는 `CONNECTED` / `DISCONNECTED`를 가진다. disconnect 시 `status`는 유지되고 connectionStatus만 바뀐다.
 
 ## 저장소 인터페이스
 
@@ -37,3 +38,4 @@ Redis lock, requestId idempotency 강화, 접속 상태 Redis 저장, reconnect 
 requestId idempotency는 Redis `idempotency:{gameId}:{userId}:{requestId}` key로 관리한다.
 게임 command 처리 구간은 Redis `lock:game:{gameId}` key로 보호한다.
 최근 채팅은 Redis `chat:recent:{gameId}:{channel}` list에 저장한다.
+disconnect 유예 시간은 `DISCONNECT_GRACE_PERIOD_SECONDS`를 따른다. 기본값은 120초다.

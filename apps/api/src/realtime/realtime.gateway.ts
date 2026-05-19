@@ -23,12 +23,14 @@ import { GameCommandLockService } from './game-command-lock.service';
 import { ConnectionStateService } from './connection-state.service';
 import { ChatMessageCacheService } from './chat-message-cache.service';
 import { parseCommandEnvelope } from './command-envelope';
+import { GameSessionService } from '../game-session/game-session.service';
 import { RequestIdempotencyService } from './request-idempotency.service';
 import { AuthenticatedSocket } from './socket-user';
 import type {
   CommandAcceptedEvent,
   CommandRejectedEvent,
   ChatMessageEvent,
+  PlayerDisconnectedEvent,
   PongEvent,
   WhoamiEvent,
 } from '@mafia-casefile/shared';
@@ -57,6 +59,8 @@ export class RealtimeGateway
     private readonly connectionStateService: ConnectionStateService,
     @Inject(ChatMessageCacheService)
     private readonly chatMessageCacheService: ChatMessageCacheService,
+    @Inject(GameSessionService)
+    private readonly gameSessionService: GameSessionService,
     @Inject(RequestIdempotencyService)
     private readonly requestIdempotencyService: RequestIdempotencyService,
   ) {}
@@ -85,38 +89,31 @@ export class RealtimeGateway
     });
   }
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     const authedClient = client as AuthenticatedSocket;
     const user = authedClient.data.user;
 
     if (user) {
-      void client.join(`user:${user.id}`);
-      void this.connectionStateService
-        .markConnected({
+      await client.join(`user:${user.id}`);
+      try {
+        await this.connectionStateService.markConnected({
           userId: user.id,
           socketId: client.id,
-        })
-        .catch((error) => {
-          this.warnConnectionStateError('mark connected', user.id, client.id, error);
         });
+      } catch (error) {
+        this.warnConnectionStateError('mark connected', user.id, client.id, error);
+      }
     }
 
     this.logger.log(`connected ${user?.id ?? authedClient.id}`);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     const authedClient = client as AuthenticatedSocket;
     const user = authedClient.data.user;
 
     if (user) {
-      void this.connectionStateService
-        .markDisconnected({
-          userId: user.id,
-          socketId: client.id,
-        })
-        .catch((error) => {
-          this.warnConnectionStateError('mark disconnected', user.id, client.id, error);
-        });
+      await this.handleDisconnectedUser(client, user);
     }
 
     this.logger.log(`disconnected ${authedClient.data.user?.id ?? authedClient.id}`);
@@ -303,6 +300,81 @@ export class RealtimeGateway
         await this.gameCommandLockService.release(lock);
       } catch (error) {
         this.warnGameCommandLockError('release', parsed.gameId, error);
+      }
+    }
+  }
+
+  private async handleDisconnectedUser(
+    client: Socket,
+    user: { id: string; email: string },
+  ) {
+    let state: Awaited<ReturnType<ConnectionStateService['markDisconnected']>> | null = null;
+
+    try {
+      state = await this.connectionStateService.markDisconnected({
+        userId: user.id,
+        socketId: client.id,
+      });
+    } catch (error) {
+      this.warnConnectionStateError('mark disconnected', user.id, client.id, error);
+      return;
+    }
+
+    if (state.socketId !== client.id) {
+      return;
+    }
+
+    if (!state.roomId) {
+      return;
+    }
+
+    let lock: { gameId: string; token: string } | null = null;
+
+    try {
+      lock = await this.gameCommandLockService.acquire({
+        gameId: state.roomId,
+      });
+    } catch (error) {
+      this.warnGameCommandLockError('acquire', state.roomId, error);
+      return;
+    }
+
+    if (!lock) {
+      this.warnGameCommandLockError(
+        'acquire',
+        state.roomId,
+        new Error('lock busy'),
+      );
+      return;
+    }
+
+    try {
+      const disconnectedAt = new Date(
+        state.disconnectedAt ?? new Date().toISOString(),
+      );
+
+      await this.gameSessionService.markPlayerDisconnected({
+        gameId: state.roomId,
+        userId: user.id,
+        disconnectedAt,
+      });
+
+      const event: PlayerDisconnectedEvent = {
+        type: 'player:disconnected',
+        gameId: state.roomId,
+        userId: user.id,
+        disconnectedAt: disconnectedAt.toISOString(),
+        gracePeriodSeconds: this.resolveDisconnectGracePeriodSeconds(),
+      };
+
+      this.server.to(state.roomId).emit('player:disconnected', event);
+    } catch (error) {
+      this.warnGameSessionDisconnectError(state.roomId, user.id, error);
+    } finally {
+      try {
+        await this.gameCommandLockService.release(lock);
+      } catch (error) {
+        this.warnGameCommandLockError('release', state.roomId, error);
       }
     }
   }
@@ -529,6 +601,23 @@ export class RealtimeGateway
     const message =
       error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
     this.logger.warn(`failed to cache chat message for game ${gameId}, channel ${channel}: ${message}`);
+  }
+
+  private resolveDisconnectGracePeriodSeconds() {
+    const raw = process.env.DISCONNECT_GRACE_PERIOD_SECONDS;
+
+    if (!raw) {
+      return 120;
+    }
+
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : 120;
+  }
+
+  private warnGameSessionDisconnectError(gameId: string, userId: string, error: unknown) {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    this.logger.warn(`failed to mark player disconnected for game ${gameId}, user ${userId}: ${message}`);
   }
 
   private async persistRoomState(

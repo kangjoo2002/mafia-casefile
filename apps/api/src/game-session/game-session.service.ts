@@ -64,6 +64,12 @@ export interface VotingOutcomeResult {
   winnerTeam: WinnerTeam | null;
 }
 
+export interface PlayerDisconnectedResult {
+  session: GameSession;
+  player: GameSessionPlayer;
+  disconnectedAt: Date;
+}
+
 @Injectable()
 export class GameSessionService {
   private readonly stateMachine = new GameStateMachine();
@@ -132,6 +138,44 @@ export class GameSessionService {
 
   async findByGameId(gameId: string): Promise<GameSession | null> {
     return await this.repository.findByGameId(gameId);
+  }
+
+  async markPlayerDisconnected(input: {
+    gameId: string;
+    userId: string;
+    disconnectedAt?: Date;
+  }): Promise<GameSession> {
+    const session = await this.findByGameId(input.gameId);
+
+    if (!session) {
+      throw new Error('game session not found');
+    }
+
+    const playerIndex = session.players.findIndex(
+      (player) => player.userId === input.userId,
+    );
+
+    if (playerIndex < 0) {
+      throw new Error('player not found');
+    }
+
+    const disconnectedAt = input.disconnectedAt ?? new Date();
+    const updatedSession: GameSession = {
+      ...structuredClone(session),
+      players: session.players.map((player, index) =>
+        index === playerIndex
+          ? {
+              ...player,
+              connectionStatus: 'DISCONNECTED',
+              lastSeenAt: disconnectedAt,
+            }
+          : player,
+      ),
+      version: session.version + 1,
+      updatedAt: disconnectedAt,
+    };
+
+    return await this.repository.save(updatedSession);
   }
 
   async selectMafiaTarget(

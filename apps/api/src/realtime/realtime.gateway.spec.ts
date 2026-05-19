@@ -6,12 +6,14 @@ import type {
   ChatMessageEvent,
   GameStartedEvent,
   PhaseChangedEvent,
+  PlayerDisconnectedEvent,
   RoleAssignedEvent,
 } from '@mafia-casefile/shared';
 import { JwtService } from '../auth/jwt.service';
 import { GameSessionService } from '../game-session/game-session.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatMessageCacheService } from './chat-message-cache.service';
+import { ConnectionStateService } from './connection-state.service';
 import { RoomsService } from '../rooms/rooms.service';
 import { RedisService } from '../redis/redis.service';
 import { RealtimeModule } from './realtime.module';
@@ -117,12 +119,16 @@ async function sendCommandAndWait<T>(socket: Socket, command: unknown) {
   });
 }
 
-async function waitForEvent<T>(socket: Socket, eventName: string) {
+async function waitForEvent<T>(
+  socket: Socket,
+  eventName: string,
+  timeoutMs = 2000,
+) {
   return await new Promise<T>((resolve, reject) => {
     const timeout = setTimeout(() => {
       socket.off(eventName, handler);
       reject(new Error(`${eventName} timed out`));
-    }, 2000);
+    }, timeoutMs);
 
     const handler = (message: T) => {
       clearTimeout(timeout);
@@ -913,6 +919,108 @@ test('room join and leave broadcast participant updates and record events', asyn
 
   hostSocket.disconnect();
   guestSocket.disconnect();
+});
+
+test('disconnect marks player disconnected and broadcasts to the room', async () => {
+  const jwtService = new JwtService();
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const hostToken = jwtService.signAccessToken({
+    id: 'disconnect-host-user',
+    email: 'disconnect-host@example.com',
+  });
+  const guestToken = jwtService.signAccessToken({
+    id: 'disconnect-guest-user',
+    email: 'disconnect-guest@example.com',
+  });
+  const guest2Token = jwtService.signAccessToken({
+    id: 'disconnect-guest2-user',
+    email: 'disconnect-guest2@example.com',
+  });
+  const observerToken = jwtService.signAccessToken({
+    id: 'disconnect-observer-user',
+    email: 'disconnect-observer@example.com',
+  });
+  const guest3Token = jwtService.signAccessToken({
+    id: 'disconnect-guest3-user',
+    email: 'disconnect-guest3@example.com',
+  });
+
+  const room = roomsService.createRoom({
+    hostUserId: 'disconnect-host-user',
+    name: 'disconnect-room',
+  });
+
+  const host = connectClient({ token: hostToken });
+  const guest = connectClient({ token: guestToken });
+  const guest2 = connectClient({ token: guest2Token });
+  const observer = connectClient({ token: observerToken });
+  const guest3 = connectClient({ token: guest3Token });
+
+  await Promise.all([
+    waitForConnect(host),
+    waitForConnect(guest),
+    waitForConnect(guest2),
+    waitForConnect(observer),
+    waitForConnect(guest3),
+  ]);
+
+  await joinRoomCommand(host, room.roomId, 'host', 'req-disconnect-join-1');
+  await joinRoomCommand(guest, room.roomId, 'guest', 'req-disconnect-join-2');
+  await joinRoomCommand(guest2, room.roomId, 'guest2', 'req-disconnect-join-3');
+  await joinRoomCommand(observer, room.roomId, 'observer', 'req-disconnect-join-4');
+  await joinRoomCommand(guest3, room.roomId, 'guest3', 'req-disconnect-join-5');
+
+  await readyRoomCommand(host, room.roomId, true, 'req-disconnect-ready-1');
+  await readyRoomCommand(guest, room.roomId, true, 'req-disconnect-ready-2');
+  await readyRoomCommand(guest2, room.roomId, true, 'req-disconnect-ready-3');
+  await readyRoomCommand(observer, room.roomId, true, 'req-disconnect-ready-4');
+  await readyRoomCommand(guest3, room.roomId, true, 'req-disconnect-ready-5');
+  await startGameCommand(host, room.roomId, 'req-disconnect-start-1');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  const connectionState = app.get(ConnectionStateService);
+  const connectedGuest = await connectionState.findByUserId('disconnect-guest-user');
+
+  assert.ok(connectedGuest);
+  assert.equal(connectedGuest?.roomId, room.roomId);
+
+  const disconnectedEventPromise = waitForEvent<PlayerDisconnectedEvent>(
+    host,
+    'player:disconnected',
+    5000,
+  );
+
+  guest.disconnect();
+
+  const disconnectedEvent = await disconnectedEventPromise;
+  const session = await gameSessionService.findByGameId(room.roomId);
+
+  assert.equal(disconnectedEvent.type, 'player:disconnected');
+  assert.equal(disconnectedEvent.gameId, room.roomId);
+  assert.equal(disconnectedEvent.userId, 'disconnect-guest-user');
+  assert.equal(disconnectedEvent.gracePeriodSeconds, 120);
+  assert.equal(typeof disconnectedEvent.disconnectedAt, 'string');
+
+  assert.ok(session);
+  const disconnectedPlayer = session?.players.find(
+    (player) => player.userId === 'disconnect-guest-user',
+  );
+
+  assert.ok(disconnectedPlayer);
+  assert.equal(disconnectedPlayer?.connectionStatus, 'DISCONNECTED');
+  assert.equal(disconnectedPlayer?.status, 'ALIVE');
+  assert.ok(disconnectedPlayer?.lastSeenAt instanceof Date);
+  assert.equal(
+    session?.players.some((player) => player.userId === 'disconnect-guest-user'),
+    true,
+  );
+
+  host.disconnect();
+  guest2.disconnect();
+  observer.disconnect();
+  guest3.disconnect();
 });
 
 test('duplicate completed accepted command does not create duplicate event', async () => {

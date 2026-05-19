@@ -50,3 +50,11 @@ export interface PhaseChangedEvent {
   requestedByUserId: string;
   changedAt: string;
 }
+
+export interface PlayerDisconnectedEvent {
+  type: "player:disconnected";
+  gameId: string;
+  userId: string;
+  disconnectedAt: string;
+  gracePeriodSeconds: number;
+}

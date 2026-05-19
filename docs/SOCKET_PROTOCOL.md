@@ -2,7 +2,7 @@
 
 ## 현재 범위
 
-현재 Socket.IO 프로토콜은 JWT handshake 인증, `ping` / `pong`, `whoami`, 공통 `command` envelope 검증, `JOIN_ROOM` / `LEAVE_ROOM` / `CHANGE_READY` / `START_GAME` / `NEXT_PHASE` / `SELECT_MAFIA_TARGET` / `SELECT_DOCTOR_TARGET` / `SELECT_POLICE_TARGET` / `SEND_CHAT_MESSAGE`, `room:updated` / `game:started` / `phase:changed` / `chat:message` 브로드캐스트, 개인 `role:assigned` 전달, `requestId` idempotency, Redis `lock:game:{gameId}` command 직렬화, Redis recent chat cache, 그리고 `command:accepted` / `command:rejected` 응답을 제공한다.
+현재 Socket.IO 프로토콜은 JWT handshake 인증, `ping` / `pong`, `whoami`, 공통 `command` envelope 검증, `JOIN_ROOM` / `LEAVE_ROOM` / `CHANGE_READY` / `START_GAME` / `NEXT_PHASE` / `SELECT_MAFIA_TARGET` / `SELECT_DOCTOR_TARGET` / `SELECT_POLICE_TARGET` / `SEND_CHAT_MESSAGE`, `room:updated` / `game:started` / `phase:changed` / `chat:message` / `player:disconnected` 브로드캐스트, 개인 `role:assigned` 전달, `requestId` idempotency, Redis `lock:game:{gameId}` command 직렬화, Redis recent chat cache, 그리고 `command:accepted` / `command:rejected` 응답을 제공한다.
 
 ## 연결
 
@@ -20,11 +20,23 @@ io('http://localhost:3001', {
 
 연결이 성립하면 서버는 Redis에 user별 접속 상태를 저장한다. 이 상태는 `userId`, `socketId`, `roomId`, `status`, `connectedAt`, `lastSeenAt`, `disconnectedAt`을 포함하며, `JOIN_ROOM` 후 `roomId`가 갱신되고 `LEAVE_ROOM` 후 `roomId`는 `null`로 정리된다. disconnect 시에는 `DISCONNECTED` 상태가 저장된다. 이 값들은 재접속 복구의 기반이지만, 복구 로직 자체는 아직 구현하지 않는다.
 
+disconnect는 `LEAVE_ROOM`과 다르다. disconnect는 `PlayerLeft`가 아니며 방/게임에서 즉시 제거하지 않고 `player:disconnected` event로 같은 room에 상태만 알린다. payload는 `gameId`, `userId`, `disconnectedAt`, `gracePeriodSeconds`를 포함한다.
+
 `requestId`는 같은 `userId` + `gameId` 범위에서 idempotency key로 사용된다. 같은 `requestId`로 완료된 command를 다시 보내면 side effect는 재실행되지 않는다. 이전 결과가 `COMMAND_ACCEPTED`면 `command:accepted`만 다시 받을 수 있고, 이전 결과가 `COMMAND_REJECTED`면 같은 reason/message로 `command:rejected`를 다시 받는다. 같은 request가 아직 처리 중이면 `DUPLICATE_REQUEST_IN_PROGRESS`로 거부된다. idempotency TTL은 `REQUEST_ID_TTL_SECONDS`를 사용하며 기본값은 86400초다.
 
 같은 `gameId`의 command는 Redis lock으로 직렬화된다. lock을 획득하지 못하면 `GAME_LOCK_BUSY`로 거부될 수 있고, 이 경우 client는 새 `requestId`로 재시도해야 한다. lock TTL은 `GAME_COMMAND_LOCK_TTL_MS`를 사용하며 기본값은 5000ms다.
 
 성공한 `chat:message`는 Redis 최근 채팅 cache에도 저장된다. cache key는 `chat:recent:{gameId}:{channel}`이고, 기본 보관 개수는 `CHAT_CACHE_LIMIT=50`, TTL은 `CHAT_CACHE_TTL_SECONDS=86400`다. 이 cache는 reconnect 복구 기반이지만, 실제 reconnect 시 자동 전달은 아직 구현하지 않는다.
+
+```json
+{
+  "type": "player:disconnected",
+  "gameId": "room-123",
+  "userId": "user-2",
+  "disconnectedAt": "2026-05-16T00:00:00.000Z",
+  "gracePeriodSeconds": 120
+}
+```
 
 ## ping / pong
 
