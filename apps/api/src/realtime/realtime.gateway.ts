@@ -19,6 +19,7 @@ import type {
   GameCommandRejectedResult,
   GameCommandResult,
 } from '../game-commands/game-command.types';
+import { GameCommandLockService } from './game-command-lock.service';
 import { ConnectionStateService } from './connection-state.service';
 import { parseCommandEnvelope } from './command-envelope';
 import { RequestIdempotencyService } from './request-idempotency.service';
@@ -48,6 +49,8 @@ export class RealtimeGateway
     @Inject(JwtService) private readonly jwtService: JwtService,
     @Inject(GameCommandService)
     private readonly gameCommandService: GameCommandService,
+    @Inject(GameCommandLockService)
+    private readonly gameCommandLockService: GameCommandLockService,
     @Inject(ConnectionStateService)
     private readonly connectionStateService: ConnectionStateService,
     @Inject(RequestIdempotencyService)
@@ -260,6 +263,52 @@ export class RealtimeGateway
     },
     user: { id: string; email: string },
   ) {
+    let lock: { gameId: string; token: string } | null;
+
+    try {
+      lock = await this.gameCommandLockService.acquire({
+        gameId: parsed.gameId,
+      });
+    } catch (error) {
+      this.warnGameCommandLockError('acquire', parsed.gameId, error);
+      await this.executeCommandWithCompletion(client, parsed, user);
+      return;
+    }
+
+    if (!lock) {
+      const rejected = {
+        type: 'COMMAND_REJECTED' as const,
+        requestId: parsed.requestId,
+        reason: 'GAME_LOCK_BUSY',
+        message: 'Game command is busy. Retry later.',
+      };
+
+      this.emitRoomRejected(client, rejected);
+      await this.completeRequestRejected(parsed, user, rejected);
+      return;
+    }
+
+    try {
+      await this.executeCommandWithCompletion(client, parsed, user);
+    } finally {
+      try {
+        await this.gameCommandLockService.release(lock);
+      } catch (error) {
+        this.warnGameCommandLockError('release', parsed.gameId, error);
+      }
+    }
+  }
+
+  private async executeCommandWithCompletion(
+    client: Socket,
+    parsed: {
+      requestId: string;
+      gameId: string;
+      type: string;
+      payload: unknown;
+    },
+    user: { id: string; email: string },
+  ) {
     const result = await this.gameCommandService.handleCommand(parsed, user);
 
     if (result.type === 'COMMAND_REJECTED') {
@@ -416,6 +465,12 @@ export class RealtimeGateway
     this.logger.warn(
       `failed to ${action} idempotency for user ${userId}, game ${gameId}, request ${requestId}: ${message}`,
     );
+  }
+
+  private warnGameCommandLockError(action: string, gameId: string, error: unknown) {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    this.logger.warn(`failed to ${action} game command lock for game ${gameId}: ${message}`);
   }
 
   private async persistRoomState(

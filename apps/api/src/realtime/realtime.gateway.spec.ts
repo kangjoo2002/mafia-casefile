@@ -12,6 +12,7 @@ import { JwtService } from '../auth/jwt.service';
 import { GameSessionService } from '../game-session/game-session.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RoomsService } from '../rooms/rooms.service';
+import { RedisService } from '../redis/redis.service';
 import { RealtimeModule } from './realtime.module';
 import { io, Socket } from 'socket.io-client';
 
@@ -988,6 +989,76 @@ test('duplicate completed rejected command returns same rejection', async () => 
   assert.equal(secondResponse.reason, 'ROOM_NOT_FOUND');
 
   socket.disconnect();
+});
+
+test('game command lock busy rejects command and allows retry with new requestId', async () => {
+  const jwtService = new JwtService();
+  const roomsService = app.get(RoomsService);
+  const redisService = app.get(RedisService);
+
+  const hostToken = jwtService.signAccessToken({
+    id: 'lock-host-user',
+    email: 'lock-host@example.com',
+  });
+
+  const room = roomsService.createRoom({
+    hostUserId: 'lock-host-user',
+    name: 'lock-room',
+  });
+
+  const socket = connectClient({ token: hostToken });
+  await waitForConnect(socket);
+
+  await joinRoomCommand(socket, room.roomId, 'alpha', 'req-lock-join-1');
+
+  await redisService.getClient().set(
+    redisService.buildKey(`lock:game:${room.roomId}`),
+    'held-token',
+    'PX',
+    5000,
+  );
+
+  try {
+    const firstResponse = await readyRoomCommand(
+      socket,
+      room.roomId,
+      true,
+      'req-lock-ready-1',
+    );
+
+    assert.equal(firstResponse.type, 'COMMAND_REJECTED');
+    assert.equal(firstResponse.reason, 'GAME_LOCK_BUSY');
+    assert.equal(firstResponse.message, 'Game command is busy. Retry later.');
+
+    await redisService.del(`lock:game:${room.roomId}`);
+
+    const secondResponse = await readyRoomCommand(
+      socket,
+      room.roomId,
+      true,
+      'req-lock-ready-2',
+    );
+
+    assert.equal(secondResponse.type, 'COMMAND_ACCEPTED');
+    assert.equal(secondResponse.receivedType, 'CHANGE_READY');
+
+    const eventCount = await prisma.gameEventLog.count({
+      where: {
+        gameId: room.roomId,
+        type: 'PlayerReadyChanged',
+      },
+    });
+
+    assert.equal(eventCount, 1);
+  } finally {
+    await redisService.del(`lock:game:${room.roomId}`);
+    await prisma.gameEventLog.deleteMany({
+      where: {
+        gameId: room.roomId,
+      },
+    });
+    socket.disconnect();
+  }
 });
 
 test('lobby chat broadcasts and records messages', async () => {

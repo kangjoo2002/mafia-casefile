@@ -35,3 +35,4 @@ TTL은 `GAME_SESSION_TTL_SECONDS`를 사용하고 기본값은 86400초다.
 Redis lock, requestId idempotency 강화, 접속 상태 Redis 저장, reconnect 복구는 아직 별도 작업이다.
 접속 상태는 별도로 `connection:user:{userId}` / `connection:socket:{socketId}` key에 저장한다.
 requestId idempotency는 Redis `idempotency:{gameId}:{userId}:{requestId}` key로 관리한다.
+게임 command 처리 구간은 Redis `lock:game:{gameId}` key로 보호한다.
