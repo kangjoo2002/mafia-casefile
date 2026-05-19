@@ -21,12 +21,14 @@ import type {
 } from '../game-commands/game-command.types';
 import { GameCommandLockService } from './game-command-lock.service';
 import { ConnectionStateService } from './connection-state.service';
+import { ChatMessageCacheService } from './chat-message-cache.service';
 import { parseCommandEnvelope } from './command-envelope';
 import { RequestIdempotencyService } from './request-idempotency.service';
 import { AuthenticatedSocket } from './socket-user';
 import type {
   CommandAcceptedEvent,
   CommandRejectedEvent,
+  ChatMessageEvent,
   PongEvent,
   WhoamiEvent,
 } from '@mafia-casefile/shared';
@@ -53,6 +55,8 @@ export class RealtimeGateway
     private readonly gameCommandLockService: GameCommandLockService,
     @Inject(ConnectionStateService)
     private readonly connectionStateService: ConnectionStateService,
+    @Inject(ChatMessageCacheService)
+    private readonly chatMessageCacheService: ChatMessageCacheService,
     @Inject(RequestIdempotencyService)
     private readonly requestIdempotencyService: RequestIdempotencyService,
   ) {}
@@ -190,6 +194,8 @@ export class RealtimeGateway
     user: { id: string; email: string } | null,
     effects: GameCommandEffect[],
   ) {
+    const cachedChatMessages = new Set<string>();
+
     for (const effect of effects) {
       if (effect.kind === 'join') {
         await client.join(effect.roomId);
@@ -225,10 +231,12 @@ export class RealtimeGateway
 
       if (effect.kind === 'broadcast') {
         this.emitBroadcast(effect);
+        await this.cacheChatMessageEffect(effect, cachedChatMessages);
         continue;
       }
 
       this.emitPrivate(effect);
+      await this.cacheChatMessageEffect(effect, cachedChatMessages);
     }
   }
 
@@ -328,6 +336,50 @@ export class RealtimeGateway
 
   private emitPrivate(effect: GameCommandPrivateEventEffect) {
     this.server.to(`user:${effect.userId}`).emit(effect.eventName, effect.payload);
+  }
+
+  private async cacheChatMessageEffect(
+    effect: GameCommandBroadcastEffect | GameCommandPrivateEventEffect,
+    seen: Set<string>,
+  ) {
+    if (effect.eventName !== 'chat:message') {
+      return;
+    }
+
+    if (!this.isChatMessageEvent(effect.payload)) {
+      return;
+    }
+
+    const cacheKey = `${effect.payload.gameId}:${effect.payload.channel}:${effect.payload.senderUserId ?? ''}:${effect.payload.sentAt}:${effect.payload.message}`;
+
+    if (seen.has(cacheKey)) {
+      return;
+    }
+
+    seen.add(cacheKey);
+
+    try {
+      await this.chatMessageCacheService.append(effect.payload);
+    } catch (error) {
+      this.warnChatCacheError(effect.payload.gameId, effect.payload.channel, error);
+    }
+  }
+
+  private isChatMessageEvent(payload: unknown): payload is ChatMessageEvent {
+    if (typeof payload !== 'object' || payload === null) {
+      return false;
+    }
+
+    const event = payload as Partial<ChatMessageEvent>;
+
+    return (
+      event.type === 'chat:message' &&
+      typeof event.gameId === 'string' &&
+      typeof event.channel === 'string' &&
+      typeof event.message === 'string' &&
+      (typeof event.senderUserId === 'string' || event.senderUserId === null) &&
+      typeof event.sentAt === 'string'
+    );
   }
 
   private emitAccepted(client: Socket, requestId: string, receivedType: string) {
@@ -471,6 +523,12 @@ export class RealtimeGateway
     const message =
       error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
     this.logger.warn(`failed to ${action} game command lock for game ${gameId}: ${message}`);
+  }
+
+  private warnChatCacheError(gameId: string, channel: string, error: unknown) {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    this.logger.warn(`failed to cache chat message for game ${gameId}, channel ${channel}: ${message}`);
   }
 
   private async persistRoomState(

@@ -36,3 +36,4 @@ Redis lock, requestId idempotency 강화, 접속 상태 Redis 저장, reconnect 
 접속 상태는 별도로 `connection:user:{userId}` / `connection:socket:{socketId}` key에 저장한다.
 requestId idempotency는 Redis `idempotency:{gameId}:{userId}:{requestId}` key로 관리한다.
 게임 command 처리 구간은 Redis `lock:game:{gameId}` key로 보호한다.
+최근 채팅은 Redis `chat:recent:{gameId}:{channel}` list에 저장한다.

@@ -11,6 +11,7 @@ import type {
 import { JwtService } from '../auth/jwt.service';
 import { GameSessionService } from '../game-session/game-session.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ChatMessageCacheService } from './chat-message-cache.service';
 import { RoomsService } from '../rooms/rooms.service';
 import { RedisService } from '../redis/redis.service';
 import { RealtimeModule } from './realtime.module';
@@ -1063,6 +1064,7 @@ test('game command lock busy rejects command and allows retry with new requestId
 
 test('lobby chat broadcasts and records messages', async () => {
   const roomsService = app.get(RoomsService);
+  const chatMessageCacheService = app.get(ChatMessageCacheService);
 
   const room = roomsService.createRoom({
     hostUserId: 'chat-lobby-host',
@@ -1136,6 +1138,16 @@ test('lobby chat broadcasts and records messages', async () => {
     message: '안녕하세요',
     senderUserId: 'chat-lobby-host',
   });
+
+  const cachedMessages = await chatMessageCacheService.getRecent({
+    gameId: room.roomId,
+    channel: 'LOBBY',
+  });
+
+  assert.equal(cachedMessages.length, 1);
+  assert.equal(cachedMessages[0]?.channel, 'LOBBY');
+  assert.equal(cachedMessages[0]?.message, '안녕하세요');
+  assert.equal(cachedMessages[0]?.senderUserId, 'chat-lobby-host');
 
   await prisma.gameEventLog.deleteMany({
     where: {
@@ -1581,6 +1593,7 @@ test('day chat rejects dead player', async () => {
 test('mafia chat sends only to alive mafia players', async () => {
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
+  const chatMessageCacheService = app.get(ChatMessageCacheService);
 
   const room = roomsService.createRoom({
     hostUserId: 'chat-mafia-host',
@@ -1724,6 +1737,16 @@ test('mafia chat sends only to alive mafia players', async () => {
     message: '오늘은 user-3을 봅시다.',
     senderUserId: mafiaPlayer.userId,
   });
+
+  const cachedMessages = await chatMessageCacheService.getRecent({
+    gameId: room.roomId,
+    channel: 'MAFIA',
+  });
+
+  assert.equal(cachedMessages.length, 1);
+  assert.equal(cachedMessages[0]?.channel, 'MAFIA');
+  assert.equal(cachedMessages[0]?.message, '오늘은 user-3을 봅시다.');
+  assert.equal(cachedMessages[0]?.senderUserId, mafiaPlayer.userId);
 
   await prisma.gameEventLog.deleteMany({
     where: {
