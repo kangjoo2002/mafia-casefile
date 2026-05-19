@@ -913,6 +913,83 @@ test('room join and leave broadcast participant updates and record events', asyn
   guestSocket.disconnect();
 });
 
+test('duplicate completed accepted command does not create duplicate event', async () => {
+  const jwtService = new JwtService();
+  const roomsService = app.get(RoomsService);
+
+  const hostToken = jwtService.signAccessToken({
+    id: 'dup-host-user',
+    email: 'dup-host@example.com',
+  });
+
+  const room = roomsService.createRoom({
+    hostUserId: 'dup-host-user',
+    name: 'duplicate-join',
+  });
+
+  const socket = connectClient({ token: hostToken });
+  await waitForConnect(socket);
+
+  const firstResponse = await joinRoomCommand(
+    socket,
+    room.roomId,
+    'alpha',
+    'req-dup-join-1',
+  );
+  const secondResponse = await joinRoomCommand(
+    socket,
+    room.roomId,
+    'alpha',
+    'req-dup-join-1',
+  );
+
+  assert.equal(firstResponse.type, 'COMMAND_ACCEPTED');
+  assert.equal(secondResponse.type, 'COMMAND_ACCEPTED');
+
+  const eventCount = await prisma.gameEventLog.count({
+    where: {
+      gameId: room.roomId,
+      type: 'PlayerJoined',
+      requestId: 'req-dup-join-1',
+    },
+  });
+
+  assert.equal(eventCount, 1);
+
+  socket.disconnect();
+});
+
+test('duplicate completed rejected command returns same rejection', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'dup-reject-user',
+    email: 'dup-reject@example.com',
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  const firstResponse = await joinRoomCommand(
+    socket,
+    'missing-room-id',
+    'alpha',
+    'req-dup-reject-1',
+  );
+  const secondResponse = await joinRoomCommand(
+    socket,
+    'missing-room-id',
+    'alpha',
+    'req-dup-reject-1',
+  );
+
+  assert.equal(firstResponse.type, 'COMMAND_REJECTED');
+  assert.equal(secondResponse.type, 'COMMAND_REJECTED');
+  assert.equal(firstResponse.reason, 'ROOM_NOT_FOUND');
+  assert.equal(secondResponse.reason, 'ROOM_NOT_FOUND');
+
+  socket.disconnect();
+});
+
 test('lobby chat broadcasts and records messages', async () => {
   const roomsService = app.get(RoomsService);
 

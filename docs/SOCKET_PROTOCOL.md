@@ -20,6 +20,8 @@ io('http://localhost:3001', {
 
 연결이 성립하면 서버는 Redis에 user별 접속 상태를 저장한다. 이 상태는 `userId`, `socketId`, `roomId`, `status`, `connectedAt`, `lastSeenAt`, `disconnectedAt`을 포함하며, `JOIN_ROOM` 후 `roomId`가 갱신되고 `LEAVE_ROOM` 후 `roomId`는 `null`로 정리된다. disconnect 시에는 `DISCONNECTED` 상태가 저장된다. 이 값들은 재접속 복구의 기반이지만, 복구 로직 자체는 아직 구현하지 않는다.
 
+`requestId`는 같은 `userId` + `gameId` 범위에서 idempotency key로 사용된다. 같은 `requestId`로 완료된 command를 다시 보내면 side effect는 재실행되지 않는다. 이전 결과가 `COMMAND_ACCEPTED`면 `command:accepted`만 다시 받을 수 있고, 이전 결과가 `COMMAND_REJECTED`면 같은 reason/message로 `command:rejected`를 다시 받는다. 같은 request가 아직 처리 중이면 `DUPLICATE_REQUEST_IN_PROGRESS`로 거부된다. idempotency TTL은 `REQUEST_ID_TTL_SECONDS`를 사용하며 기본값은 86400초다.
+
 ## ping / pong
 
 클라이언트가 `ping` 이벤트를 보내면 서버는 `pong` 이벤트로 응답한다.

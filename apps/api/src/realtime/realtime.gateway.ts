@@ -21,6 +21,7 @@ import type {
 } from '../game-commands/game-command.types';
 import { ConnectionStateService } from './connection-state.service';
 import { parseCommandEnvelope } from './command-envelope';
+import { RequestIdempotencyService } from './request-idempotency.service';
 import { AuthenticatedSocket } from './socket-user';
 import type {
   CommandAcceptedEvent,
@@ -49,6 +50,8 @@ export class RealtimeGateway
     private readonly gameCommandService: GameCommandService,
     @Inject(ConnectionStateService)
     private readonly connectionStateService: ConnectionStateService,
+    @Inject(RequestIdempotencyService)
+    private readonly requestIdempotencyService: RequestIdempotencyService,
   ) {}
 
   afterInit(server: Server) {
@@ -139,18 +142,36 @@ export class RealtimeGateway
     }
 
     const authedClient = client as AuthenticatedSocket;
-    const result = await this.gameCommandService.handleCommand(
-      parsed,
-      authedClient.data.user ?? null,
-    );
+    const user = authedClient.data.user ?? null;
 
-    if (result.type === 'COMMAND_REJECTED') {
-      this.emitRoomRejected(client, result);
+    if (!user) {
+      await this.handleCommandWithoutIdempotency(client, parsed, user);
       return;
     }
 
-    await this.applyCommandEffects(client, authedClient.data.user ?? null, result.effects);
-    this.emitAccepted(client, result.requestId, result.receivedType);
+    const idempotency = await this.beginRequestIdempotency(parsed, user);
+
+    if (!idempotency) {
+      await this.handleCommandWithoutIdempotency(client, parsed, user);
+      return;
+    }
+
+    if (idempotency.status === 'DUPLICATE_PROCESSING') {
+      this.emitRoomRejected(client, {
+        type: 'COMMAND_REJECTED',
+        requestId: parsed.requestId,
+        reason: 'DUPLICATE_REQUEST_IN_PROGRESS',
+        message: 'Duplicate request is already processing.',
+      });
+      return;
+    }
+
+    if (idempotency.status === 'DUPLICATE_COMPLETED') {
+      this.emitCompletedRequest(client, idempotency.record, parsed.type);
+      return;
+    }
+
+    await this.handleCommandWithIdempotency(client, parsed, user);
   }
 
   @SubscribeMessage('whoami')
@@ -208,6 +229,50 @@ export class RealtimeGateway
     }
   }
 
+  private async handleCommandWithoutIdempotency(
+    client: Socket,
+    parsed: {
+      requestId: string;
+      gameId: string;
+      type: string;
+      payload: unknown;
+    },
+    user: { id: string; email: string } | null,
+  ) {
+    const result = await this.gameCommandService.handleCommand(parsed, user);
+
+    if (result.type === 'COMMAND_REJECTED') {
+      this.emitRoomRejected(client, result);
+      return;
+    }
+
+    await this.applyCommandEffects(client, user, result.effects);
+    this.emitAccepted(client, result.requestId, result.receivedType);
+  }
+
+  private async handleCommandWithIdempotency(
+    client: Socket,
+    parsed: {
+      requestId: string;
+      gameId: string;
+      type: string;
+      payload: unknown;
+    },
+    user: { id: string; email: string },
+  ) {
+    const result = await this.gameCommandService.handleCommand(parsed, user);
+
+    if (result.type === 'COMMAND_REJECTED') {
+      this.emitRoomRejected(client, result);
+      await this.completeRequestRejected(parsed, user, result);
+      return;
+    }
+
+    await this.applyCommandEffects(client, user, result.effects);
+    this.emitAccepted(client, result.requestId, result.receivedType);
+    await this.completeRequestAccepted(parsed, user, result.receivedType);
+  }
+
   private emitBroadcast(effect: GameCommandBroadcastEffect) {
     this.server.to(effect.roomId).emit(effect.eventName, effect.payload);
   }
@@ -235,6 +300,122 @@ export class RealtimeGateway
     };
 
     client.emit('command:rejected', rejected);
+  }
+
+  private emitCompletedRequest(
+    client: Socket,
+    record: {
+      requestId: string;
+      resultType?: 'COMMAND_ACCEPTED' | 'COMMAND_REJECTED';
+      reason?: string;
+      message?: string;
+      receivedType?: string;
+    },
+    receivedType: string,
+  ) {
+    if (record.resultType === 'COMMAND_ACCEPTED') {
+      this.emitAccepted(client, record.requestId, record.receivedType ?? receivedType);
+      return;
+    }
+
+    this.emitRoomRejected(client, {
+      type: 'COMMAND_REJECTED',
+      requestId: record.requestId,
+      reason: record.reason ?? 'ROOM_COMMAND_FAILED',
+      message: record.message ?? 'Command failed.',
+    });
+  }
+
+  private async beginRequestIdempotency(
+    parsed: {
+      requestId: string;
+      gameId: string;
+      type: string;
+    },
+    user: { id: string; email: string },
+  ) {
+    try {
+      return await this.requestIdempotencyService.begin({
+        gameId: parsed.gameId,
+        userId: user.id,
+        requestId: parsed.requestId,
+        commandType: parsed.type,
+      });
+    } catch (error) {
+      this.warnIdempotencyError('begin', user.id, parsed.gameId, parsed.requestId, error);
+      return null;
+    }
+  }
+
+  private async completeRequestAccepted(
+    parsed: {
+      requestId: string;
+      gameId: string;
+      type: string;
+    },
+    user: { id: string; email: string },
+    receivedType: string,
+  ) {
+    try {
+      await this.requestIdempotencyService.completeAccepted({
+        gameId: parsed.gameId,
+        userId: user.id,
+        requestId: parsed.requestId,
+        commandType: parsed.type,
+        receivedType,
+      });
+    } catch (error) {
+      this.warnIdempotencyError(
+        'complete accepted',
+        user.id,
+        parsed.gameId,
+        parsed.requestId,
+        error,
+      );
+    }
+  }
+
+  private async completeRequestRejected(
+    parsed: {
+      requestId: string;
+      gameId: string;
+      type: string;
+    },
+    user: { id: string; email: string },
+    result: GameCommandRejectedResult,
+  ) {
+    try {
+      await this.requestIdempotencyService.completeRejected({
+        gameId: parsed.gameId,
+        userId: user.id,
+        requestId: parsed.requestId,
+        commandType: parsed.type,
+        reason: result.reason,
+        message: result.message,
+      });
+    } catch (error) {
+      this.warnIdempotencyError(
+        'complete rejected',
+        user.id,
+        parsed.gameId,
+        parsed.requestId,
+        error,
+      );
+    }
+  }
+
+  private warnIdempotencyError(
+    action: string,
+    userId: string,
+    gameId: string,
+    requestId: string,
+    error: unknown,
+  ) {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    this.logger.warn(
+      `failed to ${action} idempotency for user ${userId}, game ${gameId}, request ${requestId}: ${message}`,
+    );
   }
 
   private async persistRoomState(
