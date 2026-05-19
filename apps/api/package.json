@@ -17,6 +17,7 @@
     "test:game-session-module": "node --import tsx --test src/game-session/game-session.module.spec.ts",
     "test:game-e2e": "node --import tsx --test src/realtime/realtime.game-flow.e2e-spec.ts",
     "test:game-session": "node --import tsx --test src/game-session/game-session.repository.spec.ts",
+    "test:connection-state": "node --import tsx --test src/realtime/connection-state.service.spec.ts",
     "test:redis": "node --import tsx --test src/redis/redis.service.spec.ts",
     "test:socket": "node --import tsx --test src/realtime/realtime.gateway.spec.ts",
     "test:user-repository": "node --import tsx --test src/users/user.repository.spec.ts",
