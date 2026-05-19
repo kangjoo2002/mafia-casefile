@@ -22,6 +22,29 @@ io('http://localhost:3001', {
 
 disconnect는 `LEAVE_ROOM`과 다르다. disconnect는 `PlayerLeft`가 아니며 방/게임에서 즉시 제거하지 않고 `player:disconnected` event로 같은 room에 상태만 알린다. payload는 `gameId`, `userId`, `disconnectedAt`, `gracePeriodSeconds`를 포함한다.
 
+reconnect는 command가 아니라 connection lifecycle event다. 서버는 reconnect 시 `reconnect:state` event로 이전 room 복구 결과를 1회 전달한다.
+
+```json
+{
+  "type": "reconnect:state",
+  "userId": "user-1",
+  "restored": true,
+  "roomId": "room-123",
+  "gameId": "room-123",
+  "reason": "RESTORED",
+  "session": {},
+  "player": {},
+  "recentChats": [
+    {
+      "channel": "DAY",
+      "messages": []
+    }
+  ]
+}
+```
+
+`reason`은 `RESTORED`, `NO_PREVIOUS_STATE`, `NO_ROOM`, `GAME_SESSION_NOT_FOUND`, `PLAYER_NOT_IN_GAME` 중 하나다. recent chat은 권한에 맞는 channel만 포함하며, `SYSTEM`은 포함하지 않는다.
+
 `requestId`는 같은 `userId` + `gameId` 범위에서 idempotency key로 사용된다. 같은 `requestId`로 완료된 command를 다시 보내면 side effect는 재실행되지 않는다. 이전 결과가 `COMMAND_ACCEPTED`면 `command:accepted`만 다시 받을 수 있고, 이전 결과가 `COMMAND_REJECTED`면 같은 reason/message로 `command:rejected`를 다시 받는다. 같은 request가 아직 처리 중이면 `DUPLICATE_REQUEST_IN_PROGRESS`로 거부된다. idempotency TTL은 `REQUEST_ID_TTL_SECONDS`를 사용하며 기본값은 86400초다.
 
 같은 `gameId`의 command는 Redis lock으로 직렬화된다. lock을 획득하지 못하면 `GAME_LOCK_BUSY`로 거부될 수 있고, 이 경우 client는 새 `requestId`로 재시도해야 한다. lock TTL은 `GAME_COMMAND_LOCK_TTL_MS`를 사용하며 기본값은 5000ms다.

@@ -58,3 +58,27 @@ export interface PlayerDisconnectedEvent {
   disconnectedAt: string;
   gracePeriodSeconds: number;
 }
+
+export type ReconnectStateReason =
+  | "RESTORED"
+  | "NO_PREVIOUS_STATE"
+  | "NO_ROOM"
+  | "GAME_SESSION_NOT_FOUND"
+  | "PLAYER_NOT_IN_GAME";
+
+export interface ReconnectChatChannelSnapshot {
+  channel: ChatChannel;
+  messages: ChatMessageEvent[];
+}
+
+export interface ReconnectStateEvent {
+  type: "reconnect:state";
+  userId: string;
+  restored: boolean;
+  roomId: string | null;
+  gameId: string | null;
+  reason: ReconnectStateReason;
+  session: unknown | null;
+  player: unknown | null;
+  recentChats: ReconnectChatChannelSnapshot[];
+}

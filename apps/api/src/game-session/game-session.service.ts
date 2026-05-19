@@ -178,6 +178,44 @@ export class GameSessionService {
     return await this.repository.save(updatedSession);
   }
 
+  async markPlayerConnected(input: {
+    gameId: string;
+    userId: string;
+    connectedAt?: Date;
+  }): Promise<GameSession> {
+    const session = await this.findByGameId(input.gameId);
+
+    if (!session) {
+      throw new Error('game session not found');
+    }
+
+    const playerIndex = session.players.findIndex(
+      (player) => player.userId === input.userId,
+    );
+
+    if (playerIndex < 0) {
+      throw new Error('player not found');
+    }
+
+    const connectedAt = input.connectedAt ?? new Date();
+    const updatedSession: GameSession = {
+      ...structuredClone(session),
+      players: session.players.map((player, index) =>
+        index === playerIndex
+          ? {
+              ...player,
+              connectionStatus: 'CONNECTED',
+              lastSeenAt: connectedAt,
+            }
+          : player,
+      ),
+      version: session.version + 1,
+      updatedAt: connectedAt,
+    };
+
+    return await this.repository.save(updatedSession);
+  }
+
   async selectMafiaTarget(
     gameId: string,
     actorUserId: string,

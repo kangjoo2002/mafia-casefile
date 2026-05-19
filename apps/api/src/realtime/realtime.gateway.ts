@@ -25,6 +25,7 @@ import { ChatMessageCacheService } from './chat-message-cache.service';
 import { parseCommandEnvelope } from './command-envelope';
 import { GameSessionService } from '../game-session/game-session.service';
 import { RequestIdempotencyService } from './request-idempotency.service';
+import { ReconnectStateService } from './reconnect-state.service';
 import { AuthenticatedSocket } from './socket-user';
 import type {
   CommandAcceptedEvent,
@@ -32,6 +33,7 @@ import type {
   ChatMessageEvent,
   PlayerDisconnectedEvent,
   PongEvent,
+  ReconnectStateEvent,
   WhoamiEvent,
 } from '@mafia-casefile/shared';
 
@@ -63,6 +65,8 @@ export class RealtimeGateway
     private readonly gameSessionService: GameSessionService,
     @Inject(RequestIdempotencyService)
     private readonly requestIdempotencyService: RequestIdempotencyService,
+    @Inject(ReconnectStateService)
+    private readonly reconnectStateService: ReconnectStateService,
   ) {}
 
   afterInit(server: Server) {
@@ -94,7 +98,28 @@ export class RealtimeGateway
     const user = authedClient.data.user;
 
     if (user) {
-      await client.join(`user:${user.id}`);
+      let previousRoomId: string | null = null;
+
+      try {
+        const previousState = await this.connectionStateService.findByUserId(
+          user.id,
+        );
+        previousRoomId = previousState?.roomId ?? null;
+      } catch (error) {
+        this.warnConnectionStateError(
+          'load previous state',
+          user.id,
+          client.id,
+          error,
+        );
+      }
+
+      try {
+        await client.join(`user:${user.id}`);
+      } catch (error) {
+        this.warnConnectionStateError('join user room', user.id, client.id, error);
+      }
+
       try {
         await this.connectionStateService.markConnected({
           userId: user.id,
@@ -103,6 +128,51 @@ export class RealtimeGateway
       } catch (error) {
         this.warnConnectionStateError('mark connected', user.id, client.id, error);
       }
+
+      const fallbackReconnectState = previousRoomId
+        ? this.buildNoPreviousReconnectState(user.id)
+        : this.buildNoRoomReconnectState(user.id);
+
+      let reconnectState: ReconnectStateEvent = fallbackReconnectState;
+
+      if (previousRoomId) {
+        try {
+          await client.join(previousRoomId);
+        } catch (error) {
+          this.warnConnectionStateError(
+            'join previous room',
+            user.id,
+            client.id,
+            error,
+          );
+        }
+
+        await this.persistRoomState(
+          'set room',
+          () =>
+            this.connectionStateService.setRoom({
+              userId: user.id,
+              socketId: client.id,
+              roomId: previousRoomId,
+            }),
+          user.id,
+          client.id,
+        );
+
+        await this.markReconnectedPlayerWithLock(previousRoomId, user.id);
+
+        try {
+          reconnectState = await this.reconnectStateService.buildReconnectState({
+            userId: user.id,
+            previousRoomId,
+          });
+        } catch (error) {
+          this.warnReconnectStateError(previousRoomId, user.id, error);
+          reconnectState = fallbackReconnectState;
+        }
+      }
+
+      client.emit('reconnect:state', reconnectState);
     }
 
     this.logger.log(`connected ${user?.id ?? authedClient.id}`);
@@ -379,6 +449,42 @@ export class RealtimeGateway
     }
   }
 
+  private async markReconnectedPlayerWithLock(
+    gameId: string,
+    userId: string,
+  ) {
+    let lock: { gameId: string; token: string } | null = null;
+
+    try {
+      lock = await this.gameCommandLockService.acquire({ gameId });
+    } catch (error) {
+      this.warnGameCommandLockError('acquire', gameId, error);
+      return;
+    }
+
+    if (!lock) {
+      this.warnGameCommandLockError('acquire', gameId, new Error('lock busy'));
+      return;
+    }
+
+    try {
+      try {
+        await this.gameSessionService.markPlayerConnected({
+          gameId,
+          userId,
+        });
+      } catch (error) {
+        this.warnGameSessionReconnectError(gameId, userId, error);
+      }
+    } finally {
+      try {
+        await this.gameCommandLockService.release(lock);
+      } catch (error) {
+        this.warnGameCommandLockError('release', gameId, error);
+      }
+    }
+  }
+
   private async executeCommandWithCompletion(
     client: Socket,
     parsed: {
@@ -618,6 +724,46 @@ export class RealtimeGateway
     const message =
       error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
     this.logger.warn(`failed to mark player disconnected for game ${gameId}, user ${userId}: ${message}`);
+  }
+
+  private warnGameSessionReconnectError(gameId: string, userId: string, error: unknown) {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    this.logger.warn(`failed to mark player connected for game ${gameId}, user ${userId}: ${message}`);
+  }
+
+  private warnReconnectStateError(gameId: string, userId: string, error: unknown) {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    this.logger.warn(`failed to build reconnect state for game ${gameId}, user ${userId}: ${message}`);
+  }
+
+  private buildNoRoomReconnectState(userId: string): ReconnectStateEvent {
+    return {
+      type: 'reconnect:state',
+      userId,
+      restored: false,
+      roomId: null,
+      gameId: null,
+      reason: 'NO_ROOM',
+      session: null,
+      player: null,
+      recentChats: [],
+    };
+  }
+
+  private buildNoPreviousReconnectState(userId: string): ReconnectStateEvent {
+    return {
+      type: 'reconnect:state',
+      userId,
+      restored: false,
+      roomId: null,
+      gameId: null,
+      reason: 'NO_PREVIOUS_STATE',
+      session: null,
+      player: null,
+      recentChats: [],
+    };
   }
 
   private async persistRoomState(

@@ -7,6 +7,7 @@ import type {
   GameStartedEvent,
   PhaseChangedEvent,
   PlayerDisconnectedEvent,
+  ReconnectStateEvent,
   RoleAssignedEvent,
 } from '@mafia-casefile/shared';
 import { JwtService } from '../auth/jwt.service';
@@ -1021,6 +1022,119 @@ test('disconnect marks player disconnected and broadcasts to the room', async ()
   guest2.disconnect();
   observer.disconnect();
   guest3.disconnect();
+});
+
+test('lock busy reconnect still restores reconnect state from previous room', async () => {
+  const jwtService = new JwtService();
+  const roomsService = app.get(RoomsService);
+  const redisService = app.get(RedisService);
+
+  const hostToken = jwtService.signAccessToken({
+    id: 'reconnect-host-user',
+    email: 'reconnect-host@example.com',
+  });
+  const guestToken = jwtService.signAccessToken({
+    id: 'reconnect-guest-user',
+    email: 'reconnect-guest@example.com',
+  });
+  const guest2Token = jwtService.signAccessToken({
+    id: 'reconnect-guest2-user',
+    email: 'reconnect-guest2@example.com',
+  });
+  const guest3Token = jwtService.signAccessToken({
+    id: 'reconnect-guest3-user',
+    email: 'reconnect-guest3@example.com',
+  });
+
+  const room = roomsService.createRoom({
+    hostUserId: 'reconnect-host-user',
+    name: 'reconnect-room',
+  });
+
+  const host = connectClient({ token: hostToken });
+  const guest = connectClient({ token: guestToken });
+  const guest2 = connectClient({ token: guest2Token });
+  const guest3 = connectClient({ token: guest3Token });
+
+  await Promise.all([
+    waitForConnect(host),
+    waitForConnect(guest),
+    waitForConnect(guest2),
+    waitForConnect(guest3),
+  ]);
+
+  await joinRoomCommand(host, room.roomId, 'host', 'req-reconnect-join-1');
+  await joinRoomCommand(guest, room.roomId, 'guest', 'req-reconnect-join-2');
+  await joinRoomCommand(guest2, room.roomId, 'guest2', 'req-reconnect-join-3');
+  await joinRoomCommand(guest3, room.roomId, 'guest3', 'req-reconnect-join-4');
+
+  await readyRoomCommand(host, room.roomId, true, 'req-reconnect-ready-1');
+  await readyRoomCommand(guest, room.roomId, true, 'req-reconnect-ready-2');
+  await readyRoomCommand(guest2, room.roomId, true, 'req-reconnect-ready-3');
+  await readyRoomCommand(guest3, room.roomId, true, 'req-reconnect-ready-4');
+  await startGameCommand(host, room.roomId, 'req-reconnect-start-1');
+  await nextPhaseCommand(host, room.roomId, 'req-reconnect-next-1');
+
+  guest.disconnect();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  await redisService.getClient().set(
+    redisService.buildKey(`lock:game:${room.roomId}`),
+    'held-token',
+    'PX',
+    5000,
+  );
+
+  const reconnectingGuest = io(getUrl(), {
+    transports: ['websocket'],
+    forceNew: true,
+    autoConnect: false,
+    auth: {
+      token: guestToken,
+    },
+  });
+  reconnectingGuest.auth = {
+    token: guestToken,
+  };
+  (reconnectingGuest.io.opts as any).auth = {
+    token: guestToken,
+  };
+
+  try {
+    const reconnectStatePromise = waitForEvent<ReconnectStateEvent>(
+      reconnectingGuest,
+      'reconnect:state',
+      5000,
+    );
+
+    reconnectingGuest.connect();
+
+    const reconnectState = await reconnectStatePromise;
+
+    assert.equal(reconnectState.type, 'reconnect:state');
+    assert.equal(reconnectState.restored, true);
+    assert.equal(reconnectState.reason, 'RESTORED');
+    assert.equal(reconnectState.roomId, room.roomId);
+    assert.equal(reconnectState.gameId, room.roomId);
+    assert.ok(reconnectState.session);
+    assert.ok(reconnectState.player);
+
+    const session = reconnectState.session;
+    const player = reconnectState.player;
+
+    assert.equal(session?.gameId, room.roomId);
+    assert.equal(
+      session?.players.some((entry) => entry.userId === 'reconnect-guest-user'),
+      true,
+    );
+    assert.equal(player?.userId, 'reconnect-guest-user');
+  } finally {
+    host.disconnect();
+    guest2.disconnect();
+    guest3.disconnect();
+    reconnectingGuest.disconnect();
+    await redisService.del(`lock:game:${room.roomId}`);
+  }
 });
 
 test('duplicate completed accepted command does not create duplicate event', async () => {
