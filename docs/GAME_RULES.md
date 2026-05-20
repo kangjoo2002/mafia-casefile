@@ -19,6 +19,8 @@
 - `SELECT_MAFIA_TARGET`는 살아있는 마피아만 사용할 수 있다.
 - `SELECT_DOCTOR_TARGET`는 살아있는 의사만 사용할 수 있다.
 - `SELECT_POLICE_TARGET`는 살아있는 경찰만 사용할 수 있다.
+- 죽은 player는 밤 액션을 할 수 없다.
+- 죽은 target은 밤 액션 대상이 될 수 없다.
 - 밤 액션 결과는 `GameSession.nightActions`에 반영되고, `GameEventLog`에도 기록된다.
 
 ## 채팅
@@ -53,6 +55,8 @@
 
 - `CAST_VOTE`는 `VOTING` phase에서만 허용된다.
 - 살아있는 유저만 투표할 수 있다.
+- 죽은 player는 투표할 수 없다.
+- 죽은 target에게는 투표할 수 없다.
 - 한 유저는 한 투표 턴에 한 번만 투표할 수 있다.
 - 같은 `requestId`의 재전송은 1차 중복 차단 대상으로 처리된다.
 - 투표 결과는 `GameSession.votes`와 `GameEventLog`의 `VoteCasted` 사건으로 추적한다.
@@ -62,8 +66,10 @@
 - `NEXT_PHASE`로 `VOTING -> RESULT`를 진행하면 현재 투표 결과를 기준으로 처형이 해소된다.
 - 가장 많은 표를 받은 대상이 처형되며, 동률이거나 표가 없으면 처형은 생략된다.
 - `NEXT_PHASE`로 `NIGHT -> DAY_DISCUSSION`을 진행하면 밤 선택 결과가 해소된다.
+- 의사 보호 target과 mafia target이 같으면 밤 사망은 발생하지 않는다.
 - `PlayerExecuted`, `PlayerKilled`, `GameFinished`는 해소 결과와 종료 조건에 따라 기록된다.
-- 마피아가 모두 탈락하면 시민 승리, 마피아 수가 생존한 비마피아 수 이상이면 마피아 승리다.
+- 마피아가 0명 생존하면 시민 승리다.
+- 마피아 생존 수가 비마피아 생존 수 이상이면 마피아 승리다.
 - `FINISHED` phase는 종료 상태이며, 더 이상 게임 액션을 받을 수 없다.
 
 ## 검증 원칙

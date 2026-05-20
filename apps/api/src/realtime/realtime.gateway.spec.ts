@@ -1977,6 +1977,18 @@ test('day chat rejects dead player', async () => {
   assert.equal(response.type, 'COMMAND_REJECTED');
   assert.equal(response.reason, 'PLAYER_NOT_ALIVE');
 
+  await nextPhaseCommand(host.socket, room.roomId, 'req-chat-day-dead-next-2');
+
+  const deadVoteResponse = await voteCommand(
+    citizenSocket,
+    room.roomId,
+    'chat-day-dead-host',
+    'req-chat-day-dead-vote-1',
+  );
+
+  assert.equal(deadVoteResponse.type, 'COMMAND_REJECTED');
+  assert.equal(deadVoteResponse.reason, 'PLAYER_NOT_ALIVE');
+
   await prisma.gameEventLog.deleteMany({
     where: {
       gameId: room.roomId,
@@ -3532,6 +3544,17 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   await readyRoomCommand(guest3.socket, room.roomId, true, 'req-vote-ready-4');
 
   await startGameCommand(host.socket, room.roomId, 'req-vote-start-1');
+
+  const notVotingResponse = await voteCommand(
+    host.socket,
+    room.roomId,
+    'vote-room-guest-1',
+    'req-vote-not-voting',
+  );
+
+  assert.equal(notVotingResponse.type, 'COMMAND_REJECTED');
+  assert.equal(notVotingResponse.reason, 'GAME_NOT_IN_VOTING');
+
   await nextPhaseCommand(host.socket, room.roomId, 'req-vote-next-1');
   await nextPhaseCommand(host.socket, room.roomId, 'req-vote-next-2');
 

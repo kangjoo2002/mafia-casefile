@@ -17,6 +17,7 @@
     "test:game-session-module": "node --import tsx --test src/game-session/game-session.module.spec.ts",
     "test:game-session-disconnect": "node --import tsx --test src/game-session/game-session.disconnect.spec.ts",
     "test:game-session-reconnect": "node --import tsx --test src/game-session/game-session.reconnect.spec.ts",
+    "test:game-rules": "node --import tsx --test src/game-session/game-rules.service.spec.ts",
     "test:game-e2e": "node --import tsx --test src/realtime/realtime.game-flow.e2e-spec.ts",
     "test:game-session": "node --import tsx --test src/game-session/game-session.repository.spec.ts",
     "test:game-command-lock": "node --import tsx --test src/realtime/game-command-lock.service.spec.ts",
