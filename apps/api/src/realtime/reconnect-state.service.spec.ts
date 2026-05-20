@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { AvailableAction } from '@mafia-casefile/shared';
 import { ChatMessageCacheService } from './chat-message-cache.service';
+import { AvailableActionsService } from './available-actions.service';
 import { ReconnectStateService } from './reconnect-state.service';
 import { GameSessionModule } from '../game-session/game-session.module';
 import { GameSessionService } from '../game-session/game-session.service';
@@ -16,7 +18,11 @@ process.env.REDIS_KEY_PREFIX =
 
 @Module({
   imports: [GameSessionModule, RedisModule],
-  providers: [ReconnectStateService, ChatMessageCacheService],
+  providers: [
+    AvailableActionsService,
+    ReconnectStateService,
+    ChatMessageCacheService,
+  ],
 })
 class ReconnectStateTestModule {}
 
@@ -43,6 +49,14 @@ after(async () => {
 
 function createGameId() {
   return randomUUID();
+}
+
+function summarize(actions: AvailableAction[]) {
+  return actions.map((action) => ({
+    type: action.type,
+    channel: action.channel,
+    targetUserIds: action.targetUserIds,
+  }));
 }
 
 async function createSession(gameId: string) {
@@ -145,6 +159,7 @@ test('previousRoomId가 null이면 NO_ROOM', async () => {
   assert.equal(result.session, null);
   assert.equal(result.player, null);
   assert.deepEqual(result.recentChats, []);
+  assert.deepEqual(result.availableActions, []);
 });
 
 test('previousRoomId가 있지만 session이 없으면 GAME_SESSION_NOT_FOUND', async () => {
@@ -162,6 +177,7 @@ test('previousRoomId가 있지만 session이 없으면 GAME_SESSION_NOT_FOUND', 
   assert.equal(result.session, null);
   assert.equal(result.player, null);
   assert.deepEqual(result.recentChats, []);
+  assert.deepEqual(result.availableActions, []);
 });
 
 test('session이 있고 player가 있으면 RESTORED', async () => {
@@ -182,6 +198,18 @@ test('session이 있고 player가 있으면 RESTORED', async () => {
     assert.equal(result.gameId, gameId);
     assert.ok(result.session);
     assert.ok(result.player);
+    assert.deepEqual(summarize(result.availableActions), [
+      {
+        type: 'SELECT_MAFIA_TARGET',
+        channel: undefined,
+        targetUserIds: ['mafia-user', 'doctor-user', 'police-user', 'citizen-user'],
+      },
+      {
+        type: 'SEND_CHAT_MESSAGE',
+        channel: 'MAFIA',
+        targetUserIds: undefined,
+      },
+    ]);
 
     const channels = result.recentChats.map((entry) => entry.channel);
     assert.deepEqual(channels, ['LOBBY', 'DAY', 'MAFIA']);
@@ -209,6 +237,7 @@ test('session이 있고 player가 없으면 PLAYER_NOT_IN_GAME', async () => {
     assert.ok(result.session);
     assert.equal(result.player, null);
     assert.deepEqual(result.recentChats, []);
+    assert.deepEqual(result.availableActions, []);
   } finally {
     await cleanup(gameId);
   }
@@ -231,6 +260,36 @@ test('alive non-mafia player는 MAFIA recent chat을 받지 않는다', async ()
     assert.deepEqual(channels, ['LOBBY', 'DAY']);
     assert.equal(channels.includes('MAFIA'), false);
     assert.equal(channels.includes('GHOST'), false);
+    assert.deepEqual(result.availableActions, [
+      {
+        type: 'SELECT_DOCTOR_TARGET',
+        targetUserIds: ['mafia-user', 'doctor-user', 'police-user', 'citizen-user'],
+      },
+    ]);
+  } finally {
+    await cleanup(gameId);
+  }
+});
+
+test('VOTING phase alive player reconnect는 CAST_VOTE를 받는다', async () => {
+  const gameId = createGameId();
+
+  try {
+    await createSession(gameId);
+    await gameSessionService.advancePhase(gameId);
+    await gameSessionService.advancePhase(gameId);
+
+    const result = await reconnectStateService.buildReconnectState({
+      userId: 'doctor-user',
+      previousRoomId: gameId,
+    });
+
+    assert.deepEqual(result.availableActions, [
+      {
+        type: 'CAST_VOTE',
+        targetUserIds: ['mafia-user', 'doctor-user', 'police-user', 'citizen-user'],
+      },
+    ]);
   } finally {
     await cleanup(gameId);
   }
@@ -264,6 +323,12 @@ test('dead player는 GHOST recent chat을 받는다', async () => {
     assert.deepEqual(channels, ['LOBBY', 'DAY', 'GHOST']);
     assert.equal(channels.includes('MAFIA'), false);
     assert.equal(channels.includes('SYSTEM'), false);
+    assert.deepEqual(result.availableActions, [
+      {
+        type: 'SEND_CHAT_MESSAGE',
+        channel: 'GHOST',
+      },
+    ]);
   } finally {
     await cleanup(gameId);
   }

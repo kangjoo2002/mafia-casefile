@@ -749,6 +749,7 @@ export class RealtimeGateway
       session: null,
       player: null,
       recentChats: [],
+      availableActions: [],
     };
   }
 
@@ -763,6 +764,7 @@ export class RealtimeGateway
       session: null,
       player: null,
       recentChats: [],
+      availableActions: [],
     };
   }
 

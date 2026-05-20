@@ -35,6 +35,20 @@
 - 살아 있는 player는 `GHOST` 채팅을 보낼 수 없다.
 - 마피아가 아닌 player는 `MAFIA` 채팅을 보낼 수 없다.
 
+## availableActions
+
+- 서버는 현재 `phase`, player의 `role`, `status`, `connectionStatus`를 기준으로 클라이언트가 수행 가능한 행동을 계산한다.
+- `availableActions`는 UI 버튼 표시 기준으로 사용할 수 있지만, 실제 command 허용 여부는 서버 검증이 최종 기준이다.
+- `NEXT_PHASE`는 방장에게만 제공된다.
+- `CAST_VOTE`는 `VOTING` phase의 살아 있는 player에게 제공된다.
+- `SELECT_MAFIA_TARGET`는 `NIGHT` phase의 살아 있는 마피아에게 제공된다.
+- `SELECT_DOCTOR_TARGET`는 `NIGHT` phase의 살아 있는 의사에게 제공된다.
+- `SELECT_POLICE_TARGET`는 `NIGHT` phase의 살아 있는 경찰에게 제공된다.
+- `SEND_CHAT_MESSAGE`의 `DAY`는 `DAY_DISCUSSION` phase의 살아 있는 player에게 제공된다.
+- `SEND_CHAT_MESSAGE`의 `MAFIA`는 `NIGHT` phase의 살아 있는 마피아에게 제공된다.
+- `SEND_CHAT_MESSAGE`의 `GHOST`는 죽은 player에게 제공된다.
+- `LOBBY`, `SYSTEM`, `END` 채팅 action은 GameSession reconnect payload의 availableActions에 포함하지 않는다.
+
 ## 투표
 
 - `CAST_VOTE`는 `VOTING` phase에서만 허용된다.

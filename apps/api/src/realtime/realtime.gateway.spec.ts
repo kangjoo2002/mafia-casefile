@@ -1118,16 +1118,20 @@ test('lock busy reconnect still restores reconnect state from previous room', as
     assert.equal(reconnectState.gameId, room.roomId);
     assert.ok(reconnectState.session);
     assert.ok(reconnectState.player);
+    assert.ok(Array.isArray(reconnectState.availableActions));
 
-    const session = reconnectState.session;
-    const player = reconnectState.player;
+    const session = reconnectState.session as {
+      gameId: string;
+      players: Array<{ userId: string }>;
+    };
+    const player = reconnectState.player as { userId: string };
 
-    assert.equal(session?.gameId, room.roomId);
+    assert.equal(session.gameId, room.roomId);
     assert.equal(
-      session?.players.some((entry) => entry.userId === 'reconnect-guest-user'),
+      session.players.some((entry) => entry.userId === 'reconnect-guest-user'),
       true,
     );
-    assert.equal(player?.userId, 'reconnect-guest-user');
+    assert.equal(player.userId, 'reconnect-guest-user');
   } finally {
     host.disconnect();
     guest2.disconnect();

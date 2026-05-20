@@ -8,6 +8,20 @@ export interface SocketUser {
 
 export type ChatChannel = "LOBBY" | "DAY" | "MAFIA" | "GHOST" | "SYSTEM";
 
+export type AvailableActionType =
+  | "NEXT_PHASE"
+  | "CAST_VOTE"
+  | "SELECT_MAFIA_TARGET"
+  | "SELECT_DOCTOR_TARGET"
+  | "SELECT_POLICE_TARGET"
+  | "SEND_CHAT_MESSAGE";
+
+export interface AvailableAction {
+  type: AvailableActionType;
+  channel?: ChatChannel;
+  targetUserIds?: string[];
+}
+
 export interface ChatMessageEvent {
   type: "chat:message";
   gameId: string;
@@ -81,4 +95,5 @@ export interface ReconnectStateEvent {
   session: unknown | null;
   player: unknown | null;
   recentChats: ReconnectChatChannelSnapshot[];
+  availableActions: AvailableAction[];
 }

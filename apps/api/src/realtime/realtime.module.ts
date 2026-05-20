@@ -8,6 +8,7 @@ import { ChatMessageCacheService } from './chat-message-cache.service';
 import { GameCommandLockService } from './game-command-lock.service';
 import { RequestIdempotencyService } from './request-idempotency.service';
 import { ReconnectStateService } from './reconnect-state.service';
+import { AvailableActionsService } from './available-actions.service';
 import { RealtimeGateway } from './realtime.gateway';
 
 @Module({
@@ -18,6 +19,7 @@ import { RealtimeGateway } from './realtime.gateway';
     GameCommandLockService,
     RequestIdempotencyService,
     ReconnectStateService,
+    AvailableActionsService,
     RealtimeGateway,
   ],
 })

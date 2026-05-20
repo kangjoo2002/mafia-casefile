@@ -8,6 +8,7 @@ import type {
   Role,
 } from '@mafia-casefile/shared';
 import { ChatMessageCacheService } from './chat-message-cache.service';
+import { AvailableActionsService } from './available-actions.service';
 import { GameSessionService } from '../game-session/game-session.service';
 
 @Injectable()
@@ -15,6 +16,8 @@ export class ReconnectStateService {
   constructor(
     @Inject(GameSessionService)
     private readonly gameSessionService: GameSessionService,
+    @Inject(AvailableActionsService)
+    private readonly availableActionsService: AvailableActionsService,
     @Inject(ChatMessageCacheService)
     private readonly chatMessageCacheService: ChatMessageCacheService,
   ) {}
@@ -34,6 +37,7 @@ export class ReconnectStateService {
         session: null,
         player: null,
         recentChats: [],
+        availableActions: [],
       };
     }
 
@@ -52,6 +56,7 @@ export class ReconnectStateService {
         session: null,
         player: null,
         recentChats: [],
+        availableActions: [],
       };
     }
 
@@ -70,6 +75,7 @@ export class ReconnectStateService {
         session: structuredClone(session),
         player: null,
         recentChats: [],
+        availableActions: [],
       };
     }
 
@@ -85,6 +91,10 @@ export class ReconnectStateService {
       session: structuredClone(session),
       player: structuredClone(player),
       recentChats,
+      availableActions: this.availableActionsService.buildForPlayer({
+        session,
+        userId: input.userId,
+      }),
     };
   }
 
