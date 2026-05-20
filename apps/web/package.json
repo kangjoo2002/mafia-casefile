@@ -10,11 +10,14 @@
   },
   "dependencies": {
     "@mafia-casefile/shared": "workspace:*",
+    "jsonwebtoken": "latest",
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "socket.io-client": "latest"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "latest",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",

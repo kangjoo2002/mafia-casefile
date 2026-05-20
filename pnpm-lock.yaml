@@ -86,6 +86,9 @@ importers:
       '@mafia-casefile/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      jsonwebtoken:
+        specifier: latest
+        version: 9.0.3
       next:
         specifier: latest
         version: 16.2.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -95,7 +98,13 @@ importers:
       react-dom:
         specifier: latest
         version: 19.2.6(react@19.2.6)
+      socket.io-client:
+        specifier: latest
+        version: 4.8.3
     devDependencies:
+      '@types/jsonwebtoken':
+        specifier: latest
+        version: 9.0.10
       '@types/node':
         specifier: latest
         version: 25.8.0
@@ -722,6 +731,9 @@ packages:
 
   '@types/node@25.8.0':
     resolution: {integrity: sha512-TCFSk8IZh+iLX1xtksoBVtdmgL+1IX0fC9BeU4QqFSuNdN/K+HUlhqOzEmSYYpZUVsLYcPqc9KX+60iDuninSQ==}
+
+  '@types/node@25.9.1':
+    resolution: {integrity: sha512-xfrlY7UD5rMJk3ZVJP8BNzS28J36YJg+xp+LPXV1TdWxr8uMH5A860QNxYDGQe/ylDSgjxE52Q9VnO7p75tJxg==}
 
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
@@ -2109,11 +2121,15 @@ snapshots:
   '@types/jsonwebtoken@9.0.10':
     dependencies:
       '@types/ms': 2.1.0
-      '@types/node': 25.8.0
+      '@types/node': 25.9.1
 
   '@types/ms@2.1.0': {}
 
   '@types/node@25.8.0':
+    dependencies:
+      undici-types: 7.24.6
+
+  '@types/node@25.9.1':
     dependencies:
       undici-types: 7.24.6
 
