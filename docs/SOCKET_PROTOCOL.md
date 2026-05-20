@@ -63,6 +63,7 @@ reconnect는 command가 아니라 connection lifecycle event다. 서버는 recon
 `requestId`는 같은 `userId` + `gameId` 범위에서 idempotency key로 사용된다. 같은 `requestId`로 완료된 command를 다시 보내면 side effect는 재실행되지 않는다. 이전 결과가 `COMMAND_ACCEPTED`면 `command:accepted`만 다시 받을 수 있고, 이전 결과가 `COMMAND_REJECTED`면 같은 reason/message로 `command:rejected`를 다시 받는다. 같은 request가 아직 처리 중이면 `DUPLICATE_REQUEST_IN_PROGRESS`로 거부된다. idempotency TTL은 `REQUEST_ID_TTL_SECONDS`를 사용하며 기본값은 86400초다.
 
 같은 `gameId`의 command는 Redis lock으로 직렬화된다. lock을 획득하지 못하면 `GAME_LOCK_BUSY`로 거부될 수 있고, 이 경우 client는 새 `requestId`로 재시도해야 한다. lock TTL은 `GAME_COMMAND_LOCK_TTL_MS`를 사용하며 기본값은 5000ms다.
+`GAME_LOCK_BUSY`를 받은 같은 `requestId`는 이후에도 같은 rejection이 replay된다. lock이 풀린 뒤 같은 의도의 새 시도를 하려면 새 `requestId`를 사용해야 한다.
 
 성공한 `chat:message`는 Redis 최근 채팅 cache에도 저장된다. cache key는 `chat:recent:{gameId}:{channel}`이고, 기본 보관 개수는 `CHAT_CACHE_LIMIT=50`, TTL은 `CHAT_CACHE_TTL_SECONDS=86400`다. 이 cache는 reconnect 복구 기반이지만, 실제 reconnect 시 자동 전달은 아직 구현하지 않는다.
 

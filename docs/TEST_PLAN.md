@@ -31,3 +31,30 @@
 - timeline public-after-game filter
   - `pnpm --filter api test:game-event-timeline`
   - `pnpm --filter api test:game-event-recorder`
+
+## Reconnect / idempotency / lock coverage
+
+- reconnect restores room/session/player/recentChats/availableActions
+  - `pnpm --filter api test:reconnect-idempotency-lock`
+  - `pnpm --filter api test:reconnect-state`
+- reconnect socket rejoin
+  - `pnpm --filter api test:reconnect-idempotency-lock`
+- duplicate completed accepted request replay
+  - `pnpm --filter api test:reconnect-idempotency-lock`
+  - `pnpm --filter api test:request-idempotency`
+- duplicate completed rejected request replay
+  - `pnpm --filter api test:reconnect-idempotency-lock`
+  - `pnpm --filter api test:request-idempotency`
+- vote duplicate request does not mutate target
+  - `pnpm --filter api test:reconnect-idempotency-lock`
+- lock busy returns `GAME_LOCK_BUSY`
+  - `pnpm --filter api test:reconnect-idempotency-lock`
+  - `pnpm --filter api test:game-command-lock`
+- same requestId after lock busy replays rejection
+  - `pnpm --filter api test:reconnect-idempotency-lock`
+  - `pnpm --filter api test:request-idempotency`
+- new requestId after lock release can retry
+  - `pnpm --filter api test:reconnect-idempotency-lock`
+  - `pnpm --filter api test:game-command-lock`
+- disconnect/reconnect does not write GameEventLog
+  - `pnpm --filter api test:reconnect-idempotency-lock`
