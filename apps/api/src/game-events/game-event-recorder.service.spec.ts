@@ -153,6 +153,8 @@ test('recordEvent stores payload and requestId', async () => {
     requestId: 'req-22',
   });
 
+  assert.equal(created.visibilityDuringGame, EventVisibility.PUBLIC);
+  assert.equal(created.visibilityAfterGame, EventVisibility.PUBLIC);
   assert.deepEqual(created.payload, {
     channel: 'PUBLIC',
     message: 'hello',

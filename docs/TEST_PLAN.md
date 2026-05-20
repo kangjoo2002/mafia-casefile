@@ -13,3 +13,21 @@
   - `pnpm --filter api test:game-rules`
 - command rejected reason mapping
   - `pnpm --filter api test:socket`
+
+## Game event coverage
+
+- room lifecycle event 기록
+  - `pnpm --filter api test:game-event-flow`
+- start/role assignment event 기록
+  - `pnpm --filter api test:game-event-flow`
+- night action visibility
+  - `pnpm --filter api test:game-event-flow`
+- chat visibility
+  - `pnpm --filter api test:game-event-flow`
+- phase resolution event order
+  - `pnpm --filter api test:game-event-flow`
+- voting resolution event order
+  - `pnpm --filter api test:game-event-flow`
+- timeline public-after-game filter
+  - `pnpm --filter api test:game-event-timeline`
+  - `pnpm --filter api test:game-event-recorder`

@@ -11,6 +11,7 @@
     "test:unit": "node --import tsx --test src/game-session/game-session.repository.spec.ts src/game-session/game-state-machine.spec.ts src/rooms/rooms.controller.spec.ts",
     "test:auth": "node --import tsx --test src/auth/auth.service.spec.ts",
     "test:game-event": "node --import tsx --test src/game-events/game-event-log.model.spec.ts",
+    "test:game-event-flow": "node --import tsx --test src/realtime/realtime.game-events.spec.ts",
     "test:game-event-recorder": "node --import tsx --test src/game-events/game-event-recorder.service.spec.ts",
     "test:game-event-timeline": "node --import tsx --test src/game-events/game-events.controller.spec.ts",
     "test:game-session-redis": "node --import tsx --test src/game-session/redis-game-session.repository.spec.ts",

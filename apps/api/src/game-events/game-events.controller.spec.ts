@@ -72,16 +72,17 @@ test('GET /games/:gameId/timeline returns seq-ordered public events only', async
     data: {
       gameId,
       seq: 2,
-      type: 'GameFinished',
-      turn: 3,
-      phase: 'FINISHED',
+      type: 'RoleAssigned',
+      turn: 0,
+      phase: 'WAITING',
       actorUserId: null,
       payload: {
-        winnerTeam: 'CITIZEN',
+        userId: 'user-1',
+        role: 'MAFIA',
       },
-      visibilityDuringGame: EventVisibility.PUBLIC,
+      visibilityDuringGame: EventVisibility.PRIVATE,
       visibilityAfterGame: EventVisibility.PUBLIC,
-      requestId: 'req-finish',
+      requestId: 'req-role',
     },
   });
 
@@ -106,24 +107,6 @@ test('GET /games/:gameId/timeline returns seq-ordered public events only', async
     data: {
       gameId,
       seq: 3,
-      type: 'RoleAssigned',
-      turn: 0,
-      phase: 'WAITING',
-      actorUserId: null,
-      payload: {
-        userId: 'user-1',
-        role: 'MAFIA',
-      },
-      visibilityDuringGame: EventVisibility.PRIVATE,
-      visibilityAfterGame: EventVisibility.PRIVATE,
-      requestId: 'req-role',
-    },
-  });
-
-  await prisma.gameEventLog.create({
-    data: {
-      gameId,
-      seq: 4,
       type: 'ChatMessageSent',
       turn: 1,
       phase: 'DAY_DISCUSSION',
@@ -132,9 +115,26 @@ test('GET /games/:gameId/timeline returns seq-ordered public events only', async
         channel: 'PUBLIC',
         message: 'hello',
       },
-      visibilityDuringGame: EventVisibility.SYSTEM_ONLY,
+      visibilityDuringGame: EventVisibility.PUBLIC,
       visibilityAfterGame: EventVisibility.PUBLIC,
       requestId: 'req-chat',
+    },
+  });
+
+  await prisma.gameEventLog.create({
+    data: {
+      gameId,
+      seq: 4,
+      type: 'GameFinished',
+      turn: 3,
+      phase: 'FINISHED',
+      actorUserId: null,
+      payload: {
+        winnerTeam: 'CITIZEN',
+      },
+      visibilityDuringGame: EventVisibility.PUBLIC,
+      visibilityAfterGame: EventVisibility.PUBLIC,
+      requestId: 'req-finish',
     },
   });
 
@@ -159,23 +159,42 @@ test('GET /games/:gameId/timeline returns seq-ordered public events only', async
 
   assert.equal(response.status, 200);
   assert.equal(response.body.gameId, gameId);
-  assert.equal(response.body.events.length, 3);
+  assert.equal(response.body.events.length, 4);
   assert.deepEqual(
     response.body.events.map((event: { seq: number }) => event.seq),
-    [1, 2, 4],
+    [1, 2, 3, 4],
   );
   assert.deepEqual(
     response.body.events.map((event: { type: string }) => event.type),
-    ['GameStarted', 'GameFinished', 'ChatMessageSent'],
+    ['GameStarted', 'RoleAssigned', 'ChatMessageSent', 'GameFinished'],
+  );
+  assert.deepEqual(
+    Object.keys(response.body.events[0]).sort(),
+    [
+      'actorUserId',
+      'createdAt',
+      'gameId',
+      'id',
+      'payload',
+      'phase',
+      'requestId',
+      'seq',
+      'turn',
+      'type',
+      'visibilityAfterGame',
+      'visibilityDuringGame',
+    ],
   );
   assert.equal(typeof response.body.events[0].createdAt, 'string');
   assert.ok(response.body.events[0].createdAt.length > 0);
+  assert.equal(response.body.events[1].visibilityDuringGame, EventVisibility.PRIVATE);
+  assert.equal(response.body.events[1].visibilityAfterGame, EventVisibility.PUBLIC);
   assert.deepEqual(response.body.events[1].payload, {
-    winnerTeam: 'CITIZEN',
+    userId: 'user-1',
+    role: 'MAFIA',
   });
-  assert.deepEqual(response.body.events[2].payload, {
-    channel: 'PUBLIC',
-    message: 'hello',
+  assert.deepEqual(response.body.events[3].payload, {
+    winnerTeam: 'CITIZEN',
   });
   assert.ok(
     response.body.events.every(
@@ -187,6 +206,52 @@ test('GET /games/:gameId/timeline returns seq-ordered public events only', async
       (event: { gameId: string }) => event.gameId === gameId,
     ),
   );
+});
+
+test('GET /games/:gameId/timeline excludes private-after-game events', async () => {
+  const gameId = randomUUID();
+  gameIds.add(gameId);
+
+  await prisma.gameEventLog.create({
+    data: {
+      gameId,
+      seq: 1,
+      type: 'GameStarted',
+      turn: 0,
+      phase: 'WAITING',
+      actorUserId: null,
+      payload: {
+        startedByUserId: 'user-1',
+      },
+      visibilityDuringGame: EventVisibility.PUBLIC,
+      visibilityAfterGame: EventVisibility.PUBLIC,
+      requestId: 'req-start',
+    },
+  });
+
+  await prisma.gameEventLog.create({
+    data: {
+      gameId,
+      seq: 2,
+      type: 'ChatMessageSent',
+      turn: 1,
+      phase: 'DAY_DISCUSSION',
+      actorUserId: 'user-2',
+      payload: {
+        channel: 'PUBLIC',
+        message: 'secret',
+      },
+      visibilityDuringGame: EventVisibility.PUBLIC,
+      visibilityAfterGame: EventVisibility.PRIVATE,
+      requestId: 'req-secret',
+    },
+  });
+
+  const response = await request(`/games/${gameId}/timeline`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.events.map((event: { seq: number }) => event.seq), [1]);
+  assert.equal(response.body.events[0].type, 'GameStarted');
 });
 
 test('GET /games/:gameId/timeline returns 200 with empty events for missing game', async () => {

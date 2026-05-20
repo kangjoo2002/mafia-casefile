@@ -12,6 +12,12 @@
 - `getTimeline(gameId)`는 `seq` 오름차순으로 사건을 조회한다.
 - `GET /games/:gameId/timeline`은 `GameEventLog`를 `seq` 기준으로 조회한다.
 - 기본 응답은 `visibilityAfterGame = PUBLIC` 사건만 포함한다.
+- `RoleAssigned`는 게임 중 `PRIVATE`, 게임 종료 후 `PUBLIC`이다.
+- `MafiaTargetSelected`는 게임 중 `MAFIA_ONLY`, 게임 종료 후 `PUBLIC`이다.
+- `DoctorTargetSelected`는 게임 중 `PRIVATE`, 게임 종료 후 `PUBLIC`이다.
+- `PoliceInvestigated`는 게임 중 `PRIVATE`, 게임 종료 후 `PUBLIC`이다.
+- `ChatMessageSent`는 `LOBBY` / `DAY`에서 `PUBLIC`, `MAFIA`에서 `MAFIA_ONLY`, `GHOST`에서 `GHOST_ONLY`다.
+- `PlayerKilled`, `PlayerExecuted`, `GameFinished`는 게임 중과 게임 종료 후 모두 `PUBLIC`이다.
 - `JOIN_ROOM` / `LEAVE_ROOM`은 room 참여 상태를 바꾸고 `PlayerJoined` / `PlayerLeft`를 남긴다.
 - `START_GAME`은 `GameStarted`와 `RoleAssigned`를 남기고, 역할은 개인에게만 전송된다.
 - `NEXT_PHASE`는 `PhaseChanged`를 남기고, phase 전환은 `NIGHT` / `DAY_DISCUSSION` / `VOTING` / `RESULT` 순환 흐름을 따른다.
@@ -21,6 +27,7 @@
 - `CAST_VOTE`는 `VOTING`에서만 허용되고, requestId 중복은 1차로 차단된다.
 - `NEXT_PHASE`가 결과 phase로 넘어갈 때는 `PhaseChanged`가 먼저 기록되고, 그 뒤에 `PlayerKilled`, `PlayerExecuted`, `GameFinished`가 이어질 수 있다.
 - room 참여 변경은 `room:updated` broadcast와 함께 반영된다.
+- `GET /games/:gameId/timeline`은 `visibilityAfterGame = PUBLIC` 사건만 반환한다.
 
 ## 2. GameEvent 기본 원칙
 
