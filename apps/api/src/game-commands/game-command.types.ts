@@ -1,3 +1,5 @@
+import type { CommandRejectReason } from '@mafia-casefile/shared';
+
 export interface GameCommandUser {
   id: string;
   email: string;
@@ -50,7 +52,7 @@ export interface GameCommandAcceptedResult {
 export interface GameCommandRejectedResult {
   type: 'COMMAND_REJECTED';
   requestId: string;
-  reason: string;
+  reason: CommandRejectReason;
   message: string;
 }
 

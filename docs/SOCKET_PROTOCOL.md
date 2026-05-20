@@ -140,6 +140,46 @@ reconnect는 command가 아니라 connection lifecycle event다. 서버는 recon
 
 room이 없거나, 참여할 수 없거나, room 참가자가 아니면 `command:rejected`로 응답한다.
 
+## command rejected
+
+`command:rejected`는 command 실패 응답이다. payload shape는 유지되며 `reason`은 표준 error code를 사용한다.
+
+```json
+{
+  "type": "COMMAND_REJECTED",
+  "requestId": "req-123",
+  "reason": "PLAYER_NOT_ALIVE",
+  "message": "player is not alive"
+}
+```
+
+`message`는 사람이 읽을 수 있는 설명이고, client 로직 분기는 `reason` 기준으로 해야 한다. `requestId`는 envelope parse 실패처럼 command 자체를 읽지 못한 경우 비어 있을 수 있다.
+
+주요 code 의미:
+
+- `INVALID_COMMAND_ENVELOPE`: command envelope 형식이 잘못됐다.
+- `UNAUTHORIZED`: 인증된 socket user가 없다.
+- `DUPLICATE_REQUEST_IN_PROGRESS`: 같은 request가 아직 처리 중이다.
+- `GAME_LOCK_BUSY`: 같은 game command lock을 아직 얻지 못했다.
+- `ROOM_COMMAND_FAILED`: room command가 내부적으로 실패했다.
+- `GAME_SESSION_NOT_FOUND`: game session이 없다.
+- `GAME_NOT_IN_PROGRESS`: 게임이 진행 중이 아니다.
+- `GAME_ALREADY_FINISHED`: 게임이 이미 종료됐다.
+- `GAME_NOT_IN_VOTING`: 투표 phase가 아니다.
+- `GAME_NOT_IN_NIGHT`: 밤 액션 phase가 아니다.
+- `PLAYER_NOT_IN_GAME`: 해당 player가 game session에 없다.
+- `PLAYER_NOT_ALIVE`: 살아 있는 player만 필요한 command다.
+- `PLAYER_NOT_DEAD`: 죽은 player만 가능한 command다.
+- `TARGET_PLAYER_NOT_FOUND`: target player를 찾지 못했다.
+- `TARGET_PLAYER_NOT_ALIVE`: target player가 살아 있지 않다.
+- `VOTE_ALREADY_CAST`: 이미 투표했다.
+- `ROLE_NOT_ALLOWED`: 현재 role로는 할 수 없다.
+- `CHAT_NOT_ALLOWED_IN_CURRENT_PHASE`: 현재 phase에서 chat이 허용되지 않는다.
+- `INVALID_CHAT_COMMAND`: chat command payload가 잘못됐다.
+- `INVALID_CHAT_CHANNEL`: chat channel이 잘못됐다.
+- `INVALID_CHAT_MESSAGE`: chat message가 필요하다.
+- `CHAT_MESSAGE_TOO_LONG`: chat message가 너무 길다.
+
 ## ready change
 
 클라이언트는 `command` 이벤트로 room 참여자의 준비 상태를 바꾼다.

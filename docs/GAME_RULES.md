@@ -71,3 +71,4 @@
 - `NEXT_PHASE`는 현재 game session의 phase에 따라만 허용된다.
 - `PhaseChanged` 사건은 phase 전환이 확정될 때 기록된다.
 - `FINISHED`인 게임은 phase 전환 command를 더 이상 받지 않는다.
+- command 실패는 `COMMAND_REJECTED.reason` 표준 code로 내려가며, UI는 message 대신 reason code를 기준으로 분기해야 한다.

@@ -2,6 +2,7 @@ import type {
   CommandEnvelope,
   CommandRejectedEvent,
 } from '@mafia-casefile/shared';
+import { getCommandRejectMessage } from '../game-commands/game-command.errors';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -16,7 +17,7 @@ function buildRejectedEvent(requestId: string | undefined): CommandRejectedEvent
     type: 'COMMAND_REJECTED',
     requestId,
     reason: 'INVALID_COMMAND_ENVELOPE',
-    message: 'Command envelope is invalid.',
+    message: getCommandRejectMessage('INVALID_COMMAND_ENVELOPE'),
   };
 }
 

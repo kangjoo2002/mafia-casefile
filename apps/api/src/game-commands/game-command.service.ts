@@ -4,6 +4,7 @@ import type {
   ChatChannel,
   ChatMessageEvent,
   Role,
+  CommandRejectReason,
 } from '@mafia-casefile/shared';
 import { GameEventRecorderService } from '../game-events/game-event-recorder.service';
 import {
@@ -11,6 +12,7 @@ import {
   type VoteTallyEntry,
 } from '../game-session/game-session.service';
 import { RoomsService, type Room } from '../rooms/rooms.service';
+import { getCommandRejectMessage } from './game-command.errors';
 import type {
   GameCommandAcceptedResult,
   GameCommandBroadcastEffect,
@@ -125,14 +127,14 @@ export class GameCommandService {
 
   private reject(
     requestId: string,
-    reason: string,
-    message: string,
+    reason: CommandRejectReason,
+    message?: string,
   ): GameCommandRejectedResult {
     return {
       type: 'COMMAND_REJECTED',
       requestId,
       reason,
-      message,
+      message: message ?? getCommandRejectMessage(reason),
     };
   }
 
@@ -666,7 +668,7 @@ export class GameCommandService {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Phase transition failed.';
-      let reason = 'ROOM_COMMAND_FAILED';
+      let reason: CommandRejectReason = 'ROOM_COMMAND_FAILED';
 
       if (message === 'game session not found') {
         reason = 'GAME_SESSION_NOT_FOUND';
@@ -858,7 +860,7 @@ export class GameCommandService {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Night action failed.';
-      let reason = 'ROOM_COMMAND_FAILED';
+      let reason: CommandRejectReason = 'ROOM_COMMAND_FAILED';
 
       if (message === 'game session not found') {
         reason = 'GAME_SESSION_NOT_FOUND';
@@ -1234,7 +1236,7 @@ export class GameCommandService {
     payload: unknown,
   ):
     | { ok: true; payload: ParsedChatCommandPayload }
-    | { ok: false; reason: string; message: string } {
+    | { ok: false; reason: CommandRejectReason; message: string } {
     if (
       typeof payload !== 'object' ||
       payload === null ||

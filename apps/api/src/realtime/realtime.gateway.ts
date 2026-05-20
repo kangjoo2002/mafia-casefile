@@ -26,6 +26,9 @@ import { parseCommandEnvelope } from './command-envelope';
 import { GameSessionService } from '../game-session/game-session.service';
 import { RequestIdempotencyService } from './request-idempotency.service';
 import { ReconnectStateService } from './reconnect-state.service';
+import {
+  normalizeCommandRejectReason,
+} from '../game-commands/game-command.errors';
 import { PersonalEventChannelService } from './personal-event-channel.service';
 import { AuthenticatedSocket } from './socket-user';
 import type {
@@ -362,7 +365,7 @@ export class RealtimeGateway
     }
 
     if (!lock) {
-      const rejected = {
+      const rejected: GameCommandRejectedResult = {
         type: 'COMMAND_REJECTED' as const,
         requestId: parsed.requestId,
         reason: 'GAME_LOCK_BUSY',
@@ -624,7 +627,7 @@ export class RealtimeGateway
     this.emitRoomRejected(client, {
       type: 'COMMAND_REJECTED',
       requestId: record.requestId,
-      reason: record.reason ?? 'ROOM_COMMAND_FAILED',
+      reason: normalizeCommandRejectReason(record.reason),
       message: record.message ?? 'Command failed.',
     });
   }

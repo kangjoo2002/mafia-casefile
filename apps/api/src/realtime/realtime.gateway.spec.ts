@@ -11,12 +11,14 @@ import type {
   RoleAssignedEvent,
 } from '@mafia-casefile/shared';
 import { JwtService } from '../auth/jwt.service';
+import { RealtimeGateway } from './realtime.gateway';
 import { GameSessionService } from '../game-session/game-session.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatMessageCacheService } from './chat-message-cache.service';
 import { ConnectionStateService } from './connection-state.service';
 import { RoomsService } from '../rooms/rooms.service';
 import { RedisService } from '../redis/redis.service';
+import { RequestIdempotencyService } from './request-idempotency.service';
 import { RealtimeModule } from './realtime.module';
 import { io, Socket } from 'socket.io-client';
 
@@ -418,6 +420,89 @@ test('command response는 요청한 socket에만 전달된다', async () => {
   } finally {
     socketA.disconnect();
     socketB.disconnect();
+  }
+});
+
+test('unauthorized command는 UNAUTHORIZED reason으로 거부된다', async () => {
+  const gateway = app.get(RealtimeGateway);
+  const emitted: Array<{ eventName: string; payload: unknown }> = [];
+  const client = {
+    emit(eventName: string, payload: unknown) {
+      emitted.push({ eventName, payload });
+    },
+  } as const;
+
+  await (gateway as any).handleCommandWithoutIdempotency(
+    client,
+    {
+      requestId: 'req-unauthorized-1',
+      gameId: 'room-1',
+      type: 'JOIN_ROOM',
+      payload: {},
+    },
+    null,
+  );
+
+  assert.deepEqual(emitted, [
+    {
+      eventName: 'command:rejected',
+      payload: {
+        type: 'COMMAND_REJECTED',
+        requestId: 'req-unauthorized-1',
+        reason: 'UNAUTHORIZED',
+        message: 'Socket user is missing.',
+      },
+    },
+  ]);
+});
+
+test('duplicate processing command는 DUPLICATE_REQUEST_IN_PROGRESS로 거부된다', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'duplicate-processing-user',
+    email: 'duplicate-processing-user@example.com',
+  });
+  const requestIdempotencyService = app.get(RequestIdempotencyService);
+  const originalBegin = requestIdempotencyService.begin.bind(
+    requestIdempotencyService,
+  );
+
+  requestIdempotencyService.begin = async () => ({
+    status: 'DUPLICATE_PROCESSING',
+    record: {
+      gameId: 'dup-game',
+      userId: 'duplicate-processing-user',
+      requestId: 'req-duplicate-processing-1',
+      commandType: 'JOIN_ROOM',
+      status: 'PROCESSING',
+      createdAt: '2026-05-16T00:00:00.000Z',
+      updatedAt: '2026-05-16T00:00:00.000Z',
+    },
+  });
+
+  const socket = connectClient({ token });
+  await waitForConnect(socket);
+
+  try {
+    const response = await sendCommandAndWait<{
+      type: string;
+      requestId: string;
+      reason: string;
+      message: string;
+    }>(socket, {
+      type: 'JOIN_ROOM',
+      requestId: 'req-duplicate-processing-1',
+      gameId: 'dup-game',
+      payload: {
+        nickname: 'alpha',
+      },
+    });
+
+    assert.equal(response.type, 'COMMAND_REJECTED');
+    assert.equal(response.reason, 'DUPLICATE_REQUEST_IN_PROGRESS');
+  } finally {
+    requestIdempotencyService.begin = originalBegin;
+    socket.disconnect();
   }
 });
 

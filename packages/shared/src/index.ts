@@ -7,6 +7,7 @@ export type {
 export type {
   CommandAcceptedEvent,
   CommandEnvelope,
+  CommandRejectReason,
   CommandRejectedEvent,
   EventEnvelope,
   EventVisibility,
