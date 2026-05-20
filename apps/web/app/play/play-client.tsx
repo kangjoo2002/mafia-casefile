@@ -410,6 +410,16 @@ export function PlayClient() {
   }, [identity.userId, room, socket]);
 
   useEffect(() => {
+    const currentParticipant = room?.participants.find(
+      (participant) => participant.userId === identity.userId,
+    );
+
+    if (typeof currentParticipant?.isReady === "boolean") {
+      setIsReady(currentParticipant.isReady);
+    }
+  }, [identity.userId, room]);
+
+  useEffect(() => {
     const currentPlayer = session?.players.find(
       (player) => player.userId === identity.userId,
     );
@@ -979,7 +989,7 @@ export function PlayClient() {
                 onClick={handleToggleReady}
                 disabled={!roomIdInput.trim() || !socket}
               >
-                Ready 토글
+                {isReady ? "Ready 해제" : "Ready 토글"}
               </button>
               <button
                 className="button button--primary"
@@ -1114,12 +1124,26 @@ export function PlayClient() {
                             <span className={`status-pill ${statusClass(player.connectionStatus)}`}>
                               {player.connectionStatus}
                             </span>
+                            <span
+                              className={`status-pill ${
+                                isPlayerReady(room, player.userId)
+                                  ? "status-pill--good"
+                                  : "status-pill--warn"
+                              }`}
+                            >
+                              {isPlayerReady(room, player.userId) ? "READY" : "NOT READY"}
+                            </span>
                           </div>
                         </div>
                         <div className="player-item__meta">
                           <span className="meta-value">
                             role: <strong>{player.role || "UNKNOWN"}</strong>
                           </span>
+                          {isMe ? (
+                            <span className="meta-value">
+                              ready: <strong>{isReady ? "READY" : "NOT READY"}</strong>
+                            </span>
+                          ) : null}
                         </div>
                       </article>
                     );
@@ -1602,6 +1626,12 @@ function normalizeSession(
     turn: patch.turn ?? current?.turn ?? 0,
     players: basePlayers,
   };
+}
+
+function isPlayerReady(room: RoomView | null, userId: string) {
+  return room?.participants.some(
+    (participant) => participant.userId === userId && participant.isReady,
+  ) ?? false;
 }
 
 function updateSessionRole(
