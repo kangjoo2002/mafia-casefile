@@ -381,6 +381,94 @@ test('authenticated connection handles ping and whoami', async () => {
   });
 });
 
+test('command response는 요청한 socket에만 전달된다', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'personal-command-user',
+    email: 'personal-command-user@example.com',
+  });
+
+  const socketA = connectClient({ token });
+  const socketB = connectClient({ token });
+
+  await Promise.all([waitForConnect(socketA), waitForConnect(socketB)]);
+
+  try {
+    const responsePromise = sendCommandAndWait<{
+      type: string;
+      requestId: string;
+      reason: string;
+      message: string;
+    }>(socketA, {
+      type: 'PING_COMMAND',
+      requestId: '',
+      gameId: 'game-1',
+      payload: {},
+    });
+    const noEventOnSocketB = assertNoEvent(
+      socketB,
+      'command:rejected',
+      150,
+    );
+
+    const [response] = await Promise.all([responsePromise, noEventOnSocketB]);
+
+    assert.equal(response.type, 'COMMAND_REJECTED');
+    assert.equal(response.reason, 'INVALID_COMMAND_ENVELOPE');
+  } finally {
+    socketA.disconnect();
+    socketB.disconnect();
+  }
+});
+
+test('reconnect:state는 reconnect한 socket에만 전달된다', async () => {
+  const jwtService = new JwtService();
+  const token = jwtService.signAccessToken({
+    id: 'personal-reconnect-user',
+    email: 'personal-reconnect-user@example.com',
+  });
+
+  const socketA = connectClient({ token });
+  await waitForConnect(socketA);
+  const initialReconnectState = await waitForEvent<ReconnectStateEvent>(
+    socketA,
+    'reconnect:state',
+  );
+
+  assert.equal(initialReconnectState.type, 'reconnect:state');
+  assert.equal(initialReconnectState.userId, 'personal-reconnect-user');
+  assert.equal(initialReconnectState.reason, 'NO_ROOM');
+
+  const socketB = io(getUrl(), {
+    transports: ['websocket'],
+    forceNew: true,
+    autoConnect: false,
+    auth: {
+      token,
+    },
+  });
+  socketB.auth = { token };
+  (socketB.io.opts as any).auth = { token };
+
+  const reconnectStatePromise = waitForEvent<ReconnectStateEvent>(
+    socketB,
+    'reconnect:state',
+  );
+  const noEventOnSocketA = assertNoEvent(socketA, 'reconnect:state', 150);
+
+  try {
+    socketB.connect();
+    const reconnectState = await reconnectStatePromise;
+    await noEventOnSocketA;
+
+    assert.equal(reconnectState.type, 'reconnect:state');
+    assert.equal(reconnectState.userId, 'personal-reconnect-user');
+  } finally {
+    socketA.disconnect();
+    socketB.disconnect();
+  }
+});
+
 test('command envelope accepts valid commands', async () => {
   const jwtService = new JwtService();
   const token = jwtService.signAccessToken({

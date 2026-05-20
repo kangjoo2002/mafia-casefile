@@ -23,6 +23,7 @@
     "test:chat-cache": "node --import tsx --test src/realtime/chat-message-cache.service.spec.ts",
     "test:connection-state": "node --import tsx --test src/realtime/connection-state.service.spec.ts",
     "test:available-actions": "node --import tsx --test src/realtime/available-actions.service.spec.ts",
+    "test:personal-event-channel": "node --import tsx --test src/realtime/personal-event-channel.service.spec.ts",
     "test:reconnect-state": "node --import tsx --test src/realtime/reconnect-state.service.spec.ts",
     "test:request-idempotency": "node --import tsx --test src/realtime/request-idempotency.service.spec.ts",
     "test:redis": "node --import tsx --test src/redis/redis.service.spec.ts",

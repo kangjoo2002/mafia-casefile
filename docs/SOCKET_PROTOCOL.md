@@ -52,6 +52,14 @@ reconnect는 command가 아니라 connection lifecycle event다. 서버는 recon
 `reason`은 `RESTORED`, `NO_PREVIOUS_STATE`, `NO_ROOM`, `GAME_SESSION_NOT_FOUND`, `PLAYER_NOT_IN_GAME` 중 하나다. recent chat은 권한에 맞는 channel만 포함하며, `SYSTEM`은 포함하지 않는다.
 `availableActions`는 reconnect 시점 snapshot이며, 현재 phase/role/status/connectionStatus 기준으로 계산한 클라이언트 권한 힌트다. 실제 command 허용 여부는 서버 검증이 최종 기준이다.
 
+## 개인 이벤트 채널
+
+인증된 socket은 연결 시 `user:{userId}` room에 join된다. 이 room은 같은 사용자가 여러 탭이나 소켓으로 접속했을 때 공용으로 쓰는 개인 이벤트 채널이다.
+
+`role:assigned`, `MAFIA` / `GHOST` private `chat:message`는 `user:{userId}` room으로 전달된다. 반면 `command:accepted`, `command:rejected`, `reconnect:state`, `pong`, `whoami`는 요청한 현재 socket에만 전달된다.
+
+따라서 room broadcast는 방 전체에, 개인 이벤트는 해당 user room 또는 현재 socket에만 전달된다. 같은 사용자의 다른 socket으로 command 응답이나 reconnect snapshot이 퍼지지 않도록 이 구분을 유지한다.
+
 `requestId`는 같은 `userId` + `gameId` 범위에서 idempotency key로 사용된다. 같은 `requestId`로 완료된 command를 다시 보내면 side effect는 재실행되지 않는다. 이전 결과가 `COMMAND_ACCEPTED`면 `command:accepted`만 다시 받을 수 있고, 이전 결과가 `COMMAND_REJECTED`면 같은 reason/message로 `command:rejected`를 다시 받는다. 같은 request가 아직 처리 중이면 `DUPLICATE_REQUEST_IN_PROGRESS`로 거부된다. idempotency TTL은 `REQUEST_ID_TTL_SECONDS`를 사용하며 기본값은 86400초다.
 
 같은 `gameId`의 command는 Redis lock으로 직렬화된다. lock을 획득하지 못하면 `GAME_LOCK_BUSY`로 거부될 수 있고, 이 경우 client는 새 `requestId`로 재시도해야 한다. lock TTL은 `GAME_COMMAND_LOCK_TTL_MS`를 사용하며 기본값은 5000ms다.

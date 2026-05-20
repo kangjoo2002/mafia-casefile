@@ -9,6 +9,7 @@ import { GameCommandLockService } from './game-command-lock.service';
 import { RequestIdempotencyService } from './request-idempotency.service';
 import { ReconnectStateService } from './reconnect-state.service';
 import { AvailableActionsService } from './available-actions.service';
+import { PersonalEventChannelService } from './personal-event-channel.service';
 import { RealtimeGateway } from './realtime.gateway';
 
 @Module({
@@ -20,6 +21,7 @@ import { RealtimeGateway } from './realtime.gateway';
     RequestIdempotencyService,
     ReconnectStateService,
     AvailableActionsService,
+    PersonalEventChannelService,
     RealtimeGateway,
   ],
 })

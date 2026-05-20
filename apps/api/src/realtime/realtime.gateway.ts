@@ -26,6 +26,7 @@ import { parseCommandEnvelope } from './command-envelope';
 import { GameSessionService } from '../game-session/game-session.service';
 import { RequestIdempotencyService } from './request-idempotency.service';
 import { ReconnectStateService } from './reconnect-state.service';
+import { PersonalEventChannelService } from './personal-event-channel.service';
 import { AuthenticatedSocket } from './socket-user';
 import type {
   CommandAcceptedEvent,
@@ -67,6 +68,8 @@ export class RealtimeGateway
     private readonly requestIdempotencyService: RequestIdempotencyService,
     @Inject(ReconnectStateService)
     private readonly reconnectStateService: ReconnectStateService,
+    @Inject(PersonalEventChannelService)
+    private readonly personalEventChannelService: PersonalEventChannelService,
   ) {}
 
   afterInit(server: Server) {
@@ -115,7 +118,7 @@ export class RealtimeGateway
       }
 
       try {
-        await client.join(`user:${user.id}`);
+        await this.personalEventChannelService.joinUserRoom(client, user.id);
       } catch (error) {
         this.warnConnectionStateError('join user room', user.id, client.id, error);
       }
@@ -172,7 +175,11 @@ export class RealtimeGateway
         }
       }
 
-      client.emit('reconnect:state', reconnectState);
+      this.personalEventChannelService.emitToSocket(
+        client,
+        'reconnect:state',
+        reconnectState,
+      );
     }
 
     this.logger.log(`connected ${user?.id ?? authedClient.id}`);
@@ -199,7 +206,7 @@ export class RealtimeGateway
       timestamp: new Date().toISOString(),
     };
 
-    client.emit('pong', event);
+    this.personalEventChannelService.emitToSocket(client, 'pong', event);
   }
 
   @SubscribeMessage('command')
@@ -211,7 +218,11 @@ export class RealtimeGateway
 
     if ('reason' in parsed) {
       const rejected: CommandRejectedEvent = parsed;
-      client.emit('command:rejected', rejected);
+      this.personalEventChannelService.emitToSocket(
+        client,
+        'command:rejected',
+        rejected,
+      );
       return;
     }
 
@@ -253,7 +264,7 @@ export class RealtimeGateway
     const authedClient = client as AuthenticatedSocket;
     const event = authedClient.data.user as WhoamiEvent | undefined;
 
-    client.emit('whoami', event);
+    this.personalEventChannelService.emitToSocket(client, 'whoami', event);
   }
 
   private async applyCommandEffects(
@@ -513,7 +524,12 @@ export class RealtimeGateway
   }
 
   private emitPrivate(effect: GameCommandPrivateEventEffect) {
-    this.server.to(`user:${effect.userId}`).emit(effect.eventName, effect.payload);
+    this.personalEventChannelService.emitToUser(
+      this.server,
+      effect.userId,
+      effect.eventName,
+      effect.payload,
+    );
   }
 
   private async cacheChatMessageEffect(
@@ -567,7 +583,11 @@ export class RealtimeGateway
       receivedType,
     };
 
-    client.emit('command:accepted', accepted);
+    this.personalEventChannelService.emitToSocket(
+      client,
+      'command:accepted',
+      accepted,
+    );
   }
 
   private emitRoomRejected(client: Socket, result: GameCommandRejectedResult) {
@@ -578,7 +598,11 @@ export class RealtimeGateway
       message: result.message,
     };
 
-    client.emit('command:rejected', rejected);
+    this.personalEventChannelService.emitToSocket(
+      client,
+      'command:rejected',
+      rejected,
+    );
   }
 
   private emitCompletedRequest(
