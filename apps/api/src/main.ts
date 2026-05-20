@@ -7,6 +7,10 @@ async function bootstrap() {
     logger: ['error', 'warn', 'log'],
   });
 
+  app.enableCors({
+    origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    credentials: true,
+  });
   app.enableShutdownHooks();
 
   const port = Number(process.env.API_PORT ?? 3001);
