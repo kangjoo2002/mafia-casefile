@@ -17,6 +17,7 @@ import type {
   GameCommandAcceptedResult,
   GameCommandBroadcastEffect,
   GameCommandEnvelope,
+  GameCommandEffect,
   GameCommandPrivateEventEffect,
   GameCommandRejectedResult,
   GameCommandResult,
@@ -534,14 +535,38 @@ export class GameCommandService {
             reason: string;
           }
         | undefined;
+      let nightResolvedPayload:
+        | {
+            attackedUserId: string | null;
+            protectedUserId: string | null;
+            killedUserId: string | null;
+          }
+        | undefined;
+      let votingResolvedPayload:
+        | {
+            executedUserId: string | null;
+            voteResult: { targetUserId: string; count: number }[];
+          }
+        | undefined;
 
       if (
         transition.fromPhase === 'NIGHT' &&
         transition.toPhase === 'DAY_DISCUSSION'
       ) {
+        const sessionBeforeResolution =
+          await this.gameSessionService.findByGameId(parsed.gameId);
+        const attackedUserId =
+          sessionBeforeResolution?.nightActions.mafiaTarget ?? null;
+        const protectedUserId =
+          sessionBeforeResolution?.nightActions.doctorTarget ?? null;
         const outcome = await this.gameSessionService.resolveNightOutcome(
           parsed.gameId,
         );
+        nightResolvedPayload = {
+          attackedUserId,
+          protectedUserId,
+          killedUserId: outcome.killed?.userId ?? null,
+        };
 
         if (outcome.killed) {
           resolutionEvent = {
@@ -575,6 +600,10 @@ export class GameCommandService {
         const outcome = await this.gameSessionService.resolveVotingOutcome(
           parsed.gameId,
         );
+        votingResolvedPayload = {
+          executedUserId: outcome.executed?.userId ?? null,
+          voteResult: outcome.tally,
+        };
 
         if (outcome.executed) {
           resolutionEvent = {
@@ -649,7 +678,8 @@ export class GameCommandService {
         });
       }
 
-      return this.accept(parsed.requestId, parsed.type, [
+      const changedAt = new Date().toISOString();
+      const effects: GameCommandEffect[] = [
         {
           kind: 'broadcast',
           roomId: parsed.gameId,
@@ -661,10 +691,56 @@ export class GameCommandService {
             toPhase: transition.toPhase,
             turn: transition.toTurn,
             requestedByUserId: user.id,
-            changedAt: new Date().toISOString(),
+            changedAt,
           },
         },
-      ]);
+      ];
+
+      if (nightResolvedPayload) {
+        effects.push({
+          kind: 'broadcast',
+          roomId: parsed.gameId,
+          eventName: 'night:resolved',
+          payload: {
+            type: 'night:resolved',
+            gameId: parsed.gameId,
+            turn: transition.toTurn,
+            ...nightResolvedPayload,
+            resolvedAt: changedAt,
+          },
+        });
+      }
+
+      if (votingResolvedPayload) {
+        effects.push({
+          kind: 'broadcast',
+          roomId: parsed.gameId,
+          eventName: 'voting:resolved',
+          payload: {
+            type: 'voting:resolved',
+            gameId: parsed.gameId,
+            turn: transition.toTurn,
+            ...votingResolvedPayload,
+            resolvedAt: changedAt,
+          },
+        });
+      }
+
+      if (gameFinishedPayload) {
+        effects.push({
+          kind: 'broadcast',
+          roomId: parsed.gameId,
+          eventName: 'game:finished',
+          payload: {
+            type: 'game:finished',
+            gameId: parsed.gameId,
+            ...gameFinishedPayload,
+            finishedAt: changedAt,
+          },
+        });
+      }
+
+      return this.accept(parsed.requestId, parsed.type, effects);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Phase transition failed.';
@@ -856,7 +932,25 @@ export class GameCommandService {
         requestId: parsed.requestId,
       });
 
-      return this.accept(parsed.requestId, parsed.type, []);
+      const effects: GameCommandEffect[] =
+        action === 'police'
+          ? [
+              {
+                kind: 'private',
+                userId: user.id,
+                eventName: 'investigation:result',
+                payload: {
+                  type: 'investigation:result',
+                  gameId: parsed.gameId,
+                  targetUserId: selection.target.userId,
+                  result: selection.target.role,
+                  investigatedAt: new Date().toISOString(),
+                },
+              },
+            ]
+          : [];
+
+      return this.accept(parsed.requestId, parsed.type, effects);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Night action failed.';
@@ -876,6 +970,8 @@ export class GameCommandService {
         reason = 'TARGET_PLAYER_NOT_FOUND';
       } else if (message === 'target player is not alive') {
         reason = 'TARGET_PLAYER_NOT_ALIVE';
+      } else if (message === 'target self is not allowed') {
+        reason = 'TARGET_SELF_NOT_ALLOWED';
       }
 
       return this.reject(parsed.requestId, reason, message);

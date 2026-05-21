@@ -6,13 +6,36 @@ import type {
   ChatMessageEvent,
   CommandAcceptedEvent,
   CommandRejectedEvent,
+  GameFinishedEvent,
   GameStartedEvent,
+  InvestigationResultEvent,
+  NightResolvedEvent,
   PhaseChangedEvent,
   PlayerDisconnectedEvent,
   ReconnectStateEvent,
   RoleAssignedEvent,
+  VotingResolvedEvent,
   AvailableAction,
 } from "@mafia-casefile/shared";
+import { DebugLog } from "./components/DebugLog";
+import { EntryScreen } from "./components/EntryScreen";
+import { GameScreen } from "./components/GameScreen";
+import { LobbyScreen } from "./components/LobbyScreen";
+import {
+  getAllowedChatChannels,
+  type PlayChatChannel,
+} from "./lib/chat";
+import {
+  commandRejectMessage,
+  displayChatChannel,
+  displayPhase,
+  displayRole,
+} from "./lib/display";
+import {
+  getPhaseGuide,
+  isTargetAction,
+} from "./lib/play-ui";
+import { deriveViewState } from "./lib/view-state";
 import {
   createDemoToken,
   createRoom,
@@ -22,6 +45,7 @@ import type {
   ChatMessageView,
   DemoIdentity,
   EventLogEntry,
+  GameNotice,
   GameSessionPlayerView,
   GameSessionView,
   RoomView,
@@ -55,8 +79,6 @@ const STORAGE_KEYS = {
   lastRoomId: "mafia-casefile.lastRoomId",
 } as const;
 
-const DEFAULT_CHAT_CHANNELS = ["LOBBY", "DAY", "MAFIA", "GHOST"] as const;
-
 export function PlayClient() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -71,11 +93,14 @@ export function PlayClient() {
   );
   const knownChatKeys = useRef(new Set<string>());
   const hydratedRef = useRef(false);
+  const identityUserIdRef = useRef("demo-user");
+  const roomRef = useRef<RoomView | null>(null);
+  const sessionRef = useRef<GameSessionView | null>(null);
 
   const [identity, setIdentity] = useState<DemoIdentity>(() => ({
     userId: "demo-user",
     email: "demo-user@example.com",
-    nickname: "demo-user",
+    nickname: "플레이어",
     token: "",
   }));
   const [roomIdInput, setRoomIdInput] = useState("");
@@ -88,25 +113,38 @@ export function PlayClient() {
   const [serverAvailableActions, setServerAvailableActions] = useState<AvailableAction[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessageView[]>([]);
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
+  const [gameNotices, setGameNotices] = useState<GameNotice[]>([]);
   const [socketStatus, setSocketStatus] = useState<SocketStatus>("idle");
-  const [socketId, setSocketId] = useState<string>("");
   const [connectionError, setConnectionError] = useState("");
   const [reconnectReason, setReconnectReason] = useState("");
   const [restored, setRestored] = useState(false);
-  const [chatChannel, setChatChannel] = useState<"LOBBY" | "DAY" | "MAFIA" | "GHOST">("LOBBY");
+  const [chatChannel, setChatChannel] = useState<PlayChatChannel>("LOBBY");
   const [chatMessage, setChatMessage] = useState("");
   const [isReady, setIsReady] = useState(false);
-  const [targetSelections, setTargetSelections] = useState<Record<string, string>>({});
-  const [pendingRoomBusy, setPendingRoomBusy] = useState(false);
+  const [roomMode, setRoomMode] = useState<"create" | "join">("create");
+  const [debugMode, setDebugMode] = useState(false);
+
+  useEffect(() => {
+    identityUserIdRef.current = identity.userId;
+  }, [identity.userId]);
+
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    const storedDemoUser = readLocalStorage(STORAGE_KEYS.demoUser);
-    const storedToken = readLocalStorage(STORAGE_KEYS.demoToken);
+    const storedDemoUser = readSessionStorage(STORAGE_KEYS.demoUser);
+    const storedToken = readSessionStorage(STORAGE_KEYS.demoToken);
     const storedRoomId = readLocalStorage(STORAGE_KEYS.lastRoomId);
+    setDebugMode(new URLSearchParams(window.location.search).get("debug") === "1");
 
     if (storedDemoUser) {
       try {
@@ -146,7 +184,7 @@ export function PlayClient() {
       return;
     }
 
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       STORAGE_KEYS.demoUser,
       JSON.stringify({
         userId: identity.userId,
@@ -162,7 +200,7 @@ export function PlayClient() {
     }
 
     if (identity.token) {
-      window.localStorage.setItem(STORAGE_KEYS.demoToken, identity.token);
+      window.sessionStorage.setItem(STORAGE_KEYS.demoToken, identity.token);
     }
   }, [identity.token]);
 
@@ -186,13 +224,12 @@ export function PlayClient() {
 
     const handleConnect = () => {
       setSocketStatus("connected");
-      setSocketId(socket.id ?? "");
       appendEventLog({
         title: "connect",
         kind: "success",
         payload: {
           socketId: socket.id ?? "",
-          userId: identity.userId,
+          userId: identityUserIdRef.current,
         },
       });
     };
@@ -233,7 +270,7 @@ export function PlayClient() {
 
     const handleGameStarted = (event: GameStartedEvent) => {
       setSession((current) =>
-        normalizeSession(current, room, identity.userId, {
+        normalizeSession(current, roomRef.current, identityUserIdRef.current, {
           phase: "NIGHT",
           turn: 0,
         }),
@@ -246,23 +283,25 @@ export function PlayClient() {
     };
 
     const handleRoleAssigned = (event: RoleAssignedEvent) => {
-      if (event.userId === identity.userId) {
+      const currentUserId = identityUserIdRef.current;
+
+      if (event.userId === currentUserId) {
         setMyRole(event.role);
         setSession((current) =>
-          updateSessionRole(current, event.userId, event.role, identity.userId, room),
+          updateSessionRole(current, event.userId, event.role, currentUserId, roomRef.current),
         );
       }
 
       appendEventLog({
         title: "role:assigned",
-        kind: event.userId === identity.userId ? "success" : "info",
+        kind: event.userId === currentUserId ? "success" : "info",
         payload: event,
       });
     };
 
     const handlePhaseChanged = (event: PhaseChangedEvent) => {
       setSession((current) =>
-        normalizeSession(current, room, identity.userId, {
+        normalizeSession(current, roomRef.current, identityUserIdRef.current, {
           phase: event.toPhase,
           turn: event.turn,
         }),
@@ -274,9 +313,106 @@ export function PlayClient() {
       });
     };
 
+    const handleNightResolved = (event: NightResolvedEvent) => {
+      if (event.killedUserId) {
+        setSession((current) =>
+          updateSessionPlayerStatus(
+            current,
+            event.killedUserId!,
+            "DEAD",
+            roomRef.current,
+            identityUserIdRef.current,
+          ),
+        );
+      }
+
+      appendGameNotice({
+        kind: event.killedUserId ? "error" : "success",
+        message: formatNightResolution(event, sessionRef.current, roomRef.current),
+      });
+      appendEventLog({
+        title: "night:resolved",
+        kind: event.killedUserId ? "error" : "success",
+        payload: event,
+      });
+    };
+
+    const handleVotingResolved = (event: VotingResolvedEvent) => {
+      if (event.executedUserId) {
+        setSession((current) =>
+          updateSessionPlayerStatus(
+            current,
+            event.executedUserId!,
+            "DEAD",
+            roomRef.current,
+            identityUserIdRef.current,
+          ),
+        );
+      }
+
+      appendGameNotice({
+        kind: event.executedUserId ? "error" : "info",
+        message: formatVotingResolution(event, sessionRef.current, roomRef.current),
+      });
+      appendEventLog({
+        title: "voting:resolved",
+        kind: event.executedUserId ? "error" : "info",
+        payload: event,
+      });
+    };
+
+    const handleGameFinished = (event: GameFinishedEvent) => {
+      setSession((current) =>
+        current
+          ? {
+              ...current,
+              phase: "FINISHED",
+            }
+          : current,
+      );
+      setRoom((current) =>
+        current
+          ? {
+              ...current,
+              status: "FINISHED",
+            }
+          : current,
+      );
+      appendGameNotice({
+        kind: "success",
+        message:
+          event.winnerTeam === "MAFIA"
+            ? "게임 종료: 마피아 팀이 승리했습니다."
+            : "게임 종료: 시민 팀이 승리했습니다.",
+      });
+      appendEventLog({
+        title: "game:finished",
+        kind: "success",
+        payload: event,
+      });
+    };
+
+    const handleInvestigationResult = (event: InvestigationResultEvent) => {
+      appendGameNotice({
+        kind: event.result === "MAFIA" ? "error" : "success",
+        message: `조사 결과: ${findPlayerName(sessionRef.current, roomRef.current, event.targetUserId)}은(는) ${displayRole(event.result)}입니다.`,
+      });
+      appendEventLog({
+        title: "investigation:result",
+        kind: "success",
+        payload: event,
+      });
+    };
+
     const handlePlayerDisconnected = (event: PlayerDisconnectedEvent) => {
       setSession((current) =>
-        updateSessionConnectionStatus(current, event.userId, "DISCONNECTED", room, identity.userId),
+        updateSessionConnectionStatus(
+          current,
+          event.userId,
+          "DISCONNECTED",
+          roomRef.current,
+          identityUserIdRef.current,
+        ),
       );
       appendEventLog({
         title: "player:disconnected",
@@ -358,6 +494,10 @@ export function PlayClient() {
     socket.on("game:started", handleGameStarted);
     socket.on("role:assigned", handleRoleAssigned);
     socket.on("phase:changed", handlePhaseChanged);
+    socket.on("night:resolved", handleNightResolved);
+    socket.on("voting:resolved", handleVotingResolved);
+    socket.on("game:finished", handleGameFinished);
+    socket.on("investigation:result", handleInvestigationResult);
     socket.on("player:disconnected", handlePlayerDisconnected);
     socket.on("chat:message", handleChatMessage);
     socket.on("reconnect:state", handleReconnectState);
@@ -393,6 +533,10 @@ export function PlayClient() {
     socket.on("command:accepted", acceptHandler);
     socket.on("command:rejected", rejectHandler);
 
+    if (!socket.connected) {
+      socket.connect();
+    }
+
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
@@ -401,13 +545,21 @@ export function PlayClient() {
       socket.off("game:started", handleGameStarted);
       socket.off("role:assigned", handleRoleAssigned);
       socket.off("phase:changed", handlePhaseChanged);
+      socket.off("night:resolved", handleNightResolved);
+      socket.off("voting:resolved", handleVotingResolved);
+      socket.off("game:finished", handleGameFinished);
+      socket.off("investigation:result", handleInvestigationResult);
       socket.off("player:disconnected", handlePlayerDisconnected);
       socket.off("chat:message", handleChatMessage);
       socket.off("reconnect:state", handleReconnectState);
       socket.off("command:accepted", acceptHandler);
       socket.off("command:rejected", rejectHandler);
+
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
     };
-  }, [identity.userId, room, socket]);
+  }, [socket]);
 
   useEffect(() => {
     const currentParticipant = room?.participants.find(
@@ -450,27 +602,6 @@ export function PlayClient() {
     session ? derivedAvailableActions : serverAvailableActions;
 
   useEffect(() => {
-    if (!session || !room) {
-      return;
-    }
-
-    setTargetSelections((current) => {
-      const next = { ...current };
-
-      for (const action of effectiveAvailableActions) {
-        if (action.targetUserIds?.length) {
-          const currentTarget = next[action.type];
-          if (!currentTarget || !action.targetUserIds.includes(currentTarget)) {
-            next[action.type] = action.targetUserIds[0] ?? "";
-          }
-        }
-      }
-
-      return next;
-    });
-  }, [effectiveAvailableActions, room, session]);
-
-  useEffect(() => {
     const allowedChannels = getAllowedChatChannels(room, effectiveAvailableActions);
 
     if (!allowedChannels.includes(chatChannel)) {
@@ -499,71 +630,121 @@ export function PlayClient() {
     }));
   }, [identity.userId, myConnectionStatus, myRole, myStatus, room, session]);
 
-  const visibleAllowedChannels = useMemo(() => {
-    return getAllowedChatChannels(room, effectiveAvailableActions);
-  }, [effectiveAvailableActions, room]);
-
   const currentPhase = session?.phase ?? room?.status ?? "WAITING";
   const currentTurn = session?.turn ?? 0;
   const currentRoomId = room?.roomId ?? roomIdInput.trim();
-  const currentUserId = identity.userId;
+  const currentRoomParticipant = room?.participants.find(
+    (participant) => participant.userId === identity.userId,
+  );
+  const currentRoomReady = currentRoomParticipant?.isReady ?? isReady;
+  const connected = socketStatus === "connected" && isSocketConnected(socketRef.current);
+  const inRoom = Boolean(currentRoomParticipant || session);
+  const roomControlsDisabled = !connected;
+  const readyDisabled = !connected || !roomIdInput.trim() || !inRoom;
+  const startDisabled =
+    !connected ||
+    !roomIdInput.trim() ||
+    room?.hostUserId !== identity.userId ||
+    room?.status !== "WAITING";
+  const isGameStarted = Boolean(session) || room?.status === "IN_PROGRESS";
+  const viewState = deriveViewState({
+    connected,
+    inRoom,
+    isGameStarted,
+    phase: currentPhase,
+  });
+  const allowedChatChannels = getAllowedChatChannels(room, effectiveAvailableActions);
+  const canSendChat =
+    connected &&
+    Boolean(roomIdInput.trim()) &&
+    Boolean(chatMessage.trim()) &&
+    allowedChatChannels.includes(chatChannel);
+  const targetAction = effectiveAvailableActions.find(isTargetAction) ?? null;
+  const canAdvancePhase = effectiveAvailableActions.some(
+    (action) => action.type === "NEXT_PHASE",
+  );
+  const phaseGuide = getPhaseGuide({
+    phase: currentPhase,
+    role: myRole,
+    status: myStatus,
+    targetAction,
+    canAdvancePhase,
+  });
 
-  async function handleCreateToken() {
-    try {
-      const token = await createDemoToken({
-        userId: identity.userId,
-        email: identity.email,
-      });
+  async function handleEnterGame() {
+    const nickname = normalizeNickname(identity.nickname);
 
-      setIdentity((current) => ({
-        ...current,
-        token,
-      }));
-      appendEventLog({
-        title: "demo token 발급",
-        kind: "success",
-        payload: {
-          userId: identity.userId,
-          email: identity.email,
-        },
-      });
-      setConnectionError("");
-    } catch (error) {
-      handleError("demo token 발급 실패", error);
-    }
-  }
-
-  function handleConnectSocket() {
-    if (!identity.token) {
-      setConnectionError("먼저 토큰을 발급하거나 입력하세요.");
+    if (!nickname) {
+      setConnectionError("플레이어 이름을 입력하세요.");
       return;
     }
 
-    if (socketRef.current) {
-      socketRef.current.disconnect();
+    try {
+      const canReuseIdentity =
+        Boolean(identity.token) &&
+        identity.userId !== "demo-user" &&
+        normalizeNickname(identity.nickname) === nickname;
+      const credentials = canReuseIdentity
+        ? {
+            userId: identity.userId,
+            email: identity.email,
+          }
+        : buildDemoCredentials(nickname);
+      const token = canReuseIdentity
+        ? identity.token
+        : await createDemoToken({
+            userId: credentials.userId,
+            email: credentials.email,
+          });
+
+      const nextIdentity = {
+        nickname,
+        userId: credentials.userId,
+        email: credentials.email,
+        token,
+      };
+
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+
+      setIdentity(nextIdentity);
+      setSocketStatus("connecting");
+      setConnectionError("");
+
+      const nextSocket = createSocket(token);
+      setSocket(nextSocket);
+      socketRef.current = nextSocket;
+
+      appendEventLog({
+        title: "플레이 입장",
+        kind: "success",
+        payload: {
+          nickname,
+        },
+      });
+    } catch (error) {
+      handleError("입장 실패", error);
     }
-
-    setSocketStatus("connecting");
-    setConnectionError("");
-
-    const nextSocket = createSocket(identity.token);
-    setSocket(nextSocket);
-    socketRef.current = nextSocket;
-    nextSocket.connect();
   }
 
   function handleDisconnectSocket() {
     socketRef.current?.disconnect();
+    socketRef.current = null;
     setSocketStatus("disconnected");
-    setSocketId("");
     setSocket(null);
   }
 
   async function handleCreateRoom() {
+    if (!isSocketConnected(socketRef.current)) {
+      setConnectionError("먼저 이름을 입력하고 입장하세요.");
+      return;
+    }
+
     try {
       const created = await createRoom({
         hostUserId: identity.userId,
-        name: roomNameInput,
+        name: roomNameInput.trim() || "마피아 게임",
       });
 
       setRoom(created);
@@ -577,135 +758,142 @@ export function PlayClient() {
       });
       setConnectionError("");
 
-      if (socketRef.current?.connected) {
-        try {
-          const response = await sendCommand({
-            type: "JOIN_ROOM",
-            gameId: created.roomId,
-            payload: {
-              nickname: identity.nickname,
-            },
-          });
-
-          if (response.type === "COMMAND_ACCEPTED") {
-            appendEventLog({
-              title: "host socket room join",
-              kind: "success",
-              payload: {
-                roomId: created.roomId,
-              },
-            });
-          } else {
-            appendEventLog({
-              title: "host socket room join failed",
-              kind: "error",
-              payload: response,
-            });
-          }
-        } catch (error) {
-          handleError("host socket room join failed", error);
-        }
-      } else {
-        appendEventLog({
-          title: "host socket room join skipped",
-          kind: "info",
-          payload: {
-            message:
-              "소켓 연결 후 방 참가 버튼을 눌러야 room broadcast를 받을 수 있습니다.",
-            roomId: created.roomId,
-          },
-        });
-      }
+      await joinRoom(created.roomId, "방장 자동 참가");
     } catch (error) {
       handleError("방 생성 실패", error);
     }
   }
 
-  async function handleLoadRoom() {
-    const targetRoomId = roomIdInput.trim();
+  async function handleJoinRoom() {
+    await joinRoom(roomIdInput.trim(), "방 참가");
+  }
+
+  async function joinRoom(targetRoomId: string, logTitle: string) {
+    if (!isSocketConnected(socketRef.current)) {
+      setConnectionError("먼저 이름을 입력하고 입장하세요.");
+      return;
+    }
 
     if (!targetRoomId) {
-      setConnectionError("roomId를 입력하세요.");
+      setConnectionError("방 코드를 입력하세요.");
       return;
     }
 
     try {
       const loaded = await getRoom(targetRoomId);
-      setRoom(loaded);
-      appendEventLog({
-        title: "방 조회",
-        kind: "success",
-        payload: loaded,
-      });
-      setConnectionError("");
-    } catch (error) {
-      handleError("방 조회 실패", error);
+      const currentNickname = normalizeNickname(identity.nickname).toLowerCase();
+      const duplicateName = loaded.participants.some(
+        (participant) =>
+          participant.userId !== identity.userId &&
+          normalizeNickname(participant.nickname).toLowerCase() === currentNickname,
+      );
+
+      if (duplicateName) {
+        setConnectionError("이미 같은 이름의 플레이어가 이 방에 있습니다.");
+        setRoom(loaded);
+        return;
+      }
+    } catch {
+      // Let the command response show the authoritative server error.
     }
-  }
 
-  async function handleJoinRoom() {
-    const response = await sendCommand({
-      type: "JOIN_ROOM",
-      gameId: roomIdInput.trim(),
-      payload: {
-        nickname: identity.nickname,
-      },
-    });
+    try {
+      const response = await sendCommand({
+        type: "JOIN_ROOM",
+        gameId: targetRoomId,
+        payload: {
+          nickname: identity.nickname,
+        },
+      });
 
-    if (response.type === "COMMAND_ACCEPTED") {
-      setRoomIdInput(roomIdInput.trim());
-      setPendingRoomBusy(false);
+      if (response.type === "COMMAND_ACCEPTED") {
+        setRoomIdInput(targetRoomId);
+        setConnectionError("");
+        appendEventLog({
+          title: logTitle,
+          kind: "success",
+          payload: { roomId: targetRoomId },
+        });
+        await refreshRoom(targetRoomId);
+      }
+    } catch (error) {
+      handleError(`${logTitle} 실패`, error);
     }
   }
 
   async function handleToggleReady() {
+    if (!roomIdInput.trim()) {
+      setConnectionError("방에 먼저 참가하세요.");
+      return;
+    }
+
     const next = !isReady;
     setIsReady(next);
 
-    const response = await sendCommand({
-      type: "CHANGE_READY",
-      gameId: roomIdInput.trim(),
-      payload: {
-        isReady: next,
-      },
-    });
+    try {
+      const response = await sendCommand({
+        type: "CHANGE_READY",
+        gameId: roomIdInput.trim(),
+        payload: {
+          isReady: next,
+        },
+      });
 
-    if (response.type === "COMMAND_REJECTED") {
+      if (response.type === "COMMAND_REJECTED") {
+        setIsReady((current) => !current);
+      }
+    } catch (error) {
       setIsReady((current) => !current);
+      handleError("준비 변경 실패", error);
     }
   }
 
   async function handleStartGame() {
-    await sendCommand({
-      type: "START_GAME",
-      gameId: roomIdInput.trim(),
-      payload: {},
-    });
+    try {
+      await sendCommand({
+        type: "START_GAME",
+        gameId: roomIdInput.trim(),
+        payload: {},
+      });
+    } catch (error) {
+      handleError("게임 시작 실패", error);
+    }
   }
 
   async function handleNextPhase() {
-    await sendCommand({
-      type: "NEXT_PHASE",
-      gameId: roomIdInput.trim(),
-      payload: {},
-    });
+    try {
+      await sendCommand({
+        type: "NEXT_PHASE",
+        gameId: roomIdInput.trim(),
+        payload: {},
+      });
+    } catch (error) {
+      handleError("다음 단계 진행 실패", error);
+    }
   }
 
-  async function handleTargetAction(actionType: AvailableAction["type"]) {
-    const targetUserId = targetSelections[actionType];
+  async function handleTargetPlayerAction(
+    actionType: AvailableAction["type"],
+    targetUserId: string,
+  ) {
+    try {
+      const response = await sendCommand({
+        type: actionType,
+        gameId: roomIdInput.trim(),
+        payload: {
+          targetUserId,
+        },
+      });
 
-    if (!targetUserId) {
-      setConnectionError("대상 플레이어를 선택하세요.");
-      return;
+      if (response.type === "COMMAND_ACCEPTED") {
+        appendGameNotice({
+          kind: "success",
+          message: `${findPlayerName(sessionRef.current, roomRef.current, targetUserId)}에게 ${getActionCompleteText(actionType)}`,
+        });
+      }
+    } catch (error) {
+      handleError("행동 실패", error);
     }
-
-    await sendCommand({
-      type: actionType,
-      gameId: roomIdInput.trim(),
-      payload: {
-        targetUserId,
-      },
-    });
   }
 
   async function handleSendChat() {
@@ -714,17 +902,25 @@ export function PlayClient() {
       return;
     }
 
-    const response = await sendCommand({
-      type: "SEND_CHAT_MESSAGE",
-      gameId: roomIdInput.trim(),
-      payload: {
-        channel: chatChannel,
-        message: chatMessage,
-      },
-    });
+    if (!chatMessage.trim()) {
+      return;
+    }
 
-    if (response.type === "COMMAND_ACCEPTED") {
-      setChatMessage("");
+    try {
+      const response = await sendCommand({
+        type: "SEND_CHAT_MESSAGE",
+        gameId: roomIdInput.trim(),
+        payload: {
+          channel: chatChannel,
+          message: chatMessage,
+        },
+      });
+
+      if (response.type === "COMMAND_ACCEPTED") {
+        setChatMessage("");
+      }
+    } catch (error) {
+      handleError("채팅 전송 실패", error);
     }
   }
 
@@ -742,8 +938,14 @@ export function PlayClient() {
     gameId: string;
     payload: Record<string, unknown>;
   }): Promise<CommandResponse> {
-    if (!socketRef.current) {
+    const activeSocket = socketRef.current;
+
+    if (!isSocketConnected(activeSocket)) {
       throw new Error("소켓이 연결되지 않았습니다.");
+    }
+
+    if (!input.gameId.trim()) {
+      throw new Error("방에 먼저 참가하세요.");
     }
 
     const requestId = createRequestId(input.type);
@@ -764,7 +966,7 @@ export function PlayClient() {
       });
     });
 
-    socketRef.current.emit("command", {
+    activeSocket.emit("command", {
       type: input.type,
       requestId,
       gameId: input.gameId,
@@ -773,19 +975,17 @@ export function PlayClient() {
 
     const response = await responsePromise;
     appendEventLog({
-      title: `command ${response.type === "COMMAND_ACCEPTED" ? "accepted" : "rejected"}`,
+      title: response.type === "COMMAND_ACCEPTED" ? "요청 성공" : "요청 실패",
       kind: response.type === "COMMAND_ACCEPTED" ? "success" : "error",
       payload: response,
     });
 
     if (response.type === "COMMAND_REJECTED") {
-      if (response.reason === "GAME_LOCK_BUSY") {
-        setPendingRoomBusy(true);
-      }
-
       if (response.reason === "ROOM_NOT_FOUND") {
         setRoom(null);
       }
+
+      setConnectionError(commandRejectMessage(response.reason));
     }
 
     return response;
@@ -812,6 +1012,17 @@ export function PlayClient() {
     ].slice(0, 100));
   }
 
+  function appendGameNotice(entry: Omit<GameNotice, "id" | "timestamp">) {
+    setGameNotices((current) => [
+      {
+        id: createRequestId("notice"),
+        timestamp: new Date().toISOString(),
+        ...entry,
+      },
+      ...current,
+    ].slice(0, 8));
+  }
+
   function addChatMessage(message: ChatMessageEvent) {
     const key = buildChatKey(message);
     if (knownChatKeys.current.has(key)) {
@@ -829,23 +1040,6 @@ export function PlayClient() {
     ].slice(0, 100));
   }
 
-  function handleDemoUserChange(nextUserId: string) {
-    const userId = nextUserId.trim() || createDemoIdentity().userId;
-    setIdentity((current) => ({
-      ...current,
-      userId,
-      email: current.email || `${userId}@example.com`,
-      nickname: current.nickname || userId,
-    }));
-  }
-
-  function handleEmailChange(nextEmail: string) {
-    setIdentity((current) => ({
-      ...current,
-      email: nextEmail,
-    }));
-  }
-
   function handleNicknameChange(nextNickname: string) {
     setIdentity((current) => ({
       ...current,
@@ -855,566 +1049,98 @@ export function PlayClient() {
 
   return (
     <main className="page play-page">
-      <header className="play-header">
-        <div className="play-header__title">
-          <p className="eyebrow">Mafia Casefile</p>
-          <span className="play-badge">데모 UI</span>
-          <Link className="button button--ghost" href="/">
-            홈으로
+      <header className="play-topbar">
+        <Link className="button button--ghost" href="/">
+          홈
+        </Link>
+        <div className="play-topbar__identity">
+          <strong>{connected ? identity.nickname : "입장 전"}</strong>
+          <span>{connected ? "접속 중" : "이름을 정해주세요"}</span>
+        </div>
+        {currentRoomId ? (
+          <Link
+            className="button button--secondary"
+            href={`/games/${encodeURIComponent(currentRoomId)}/timeline`}
+          >
+            사건 기록
           </Link>
-        </div>
-        <h1>실시간 4인 플레이 화면</h1>
-        <p className="hero-copy">
-          데모 토큰을 발급하거나 붙여넣고, 같은 방에 4명이 들어간 뒤 ready와
-          start를 진행해 보세요. reconnect, 채팅, 밤 액션, 투표, 복기 링크까지
-          한 화면에 모았습니다.
-        </p>
-        <div className="meta-value">
-          {socketStatus === "connected"
-            ? `연결됨 · socket ${socketId || "unknown"}`
-            : socketStatus === "connecting"
-              ? "연결 중..."
-              : socketStatus === "error"
-                ? `연결 오류 · ${connectionError || "알 수 없음"}`
-                : "아직 연결되지 않았습니다."}
-        </div>
+        ) : null}
       </header>
 
-      <section className="play-grid">
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="section-kicker">Demo Identity</p>
-              <h2>토큰과 사용자 정보</h2>
-            </div>
-          </div>
-          <div className="panel-body">
-            <div className="field-grid">
-              <label className="field">
-                <span>userId</span>
-                <input
-                  value={identity.userId}
-                  onChange={(event) => handleDemoUserChange(event.target.value)}
-                  placeholder="demo-user-1"
-                />
-              </label>
-              <label className="field">
-                <span>email</span>
-                <input
-                  value={identity.email}
-                  onChange={(event) => handleEmailChange(event.target.value)}
-                  placeholder="demo-user-1@example.com"
-                />
-              </label>
-              <label className="field">
-                <span>nickname</span>
-                <input
-                  value={identity.nickname}
-                  onChange={(event) => handleNicknameChange(event.target.value)}
-                  placeholder="demo-user-1"
-                />
-              </label>
-            </div>
-            <label className="field">
-              <span>token</span>
-              <textarea
-                value={identity.token}
-                onChange={(event) =>
-                  setIdentity((current) => ({
-                    ...current,
-                    token: event.target.value,
-                  }))
-                }
-                placeholder="토큰 발급 또는 붙여넣기"
-              />
-            </label>
-            <div className="identity-actions">
-              <div className="connection-grid">
-                <button className="button button--primary" onClick={handleCreateToken}>
-                  토큰 발급
-                </button>
-                <button className="button button--secondary" onClick={handleConnectSocket}>
-                  소켓 연결
-                </button>
-              </div>
-              <button className="button button--ghost" onClick={handleDisconnectSocket}>
-                연결 해제
-              </button>
-            </div>
-          </div>
-        </article>
+      {connectionError ? <p className="play-alert">{connectionError}</p> : null}
 
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="section-kicker">Room</p>
-              <h2>방 생성과 참가</h2>
-            </div>
-          </div>
-          <div className="panel-body">
-            <div className="room-actions">
-              <label className="field">
-                <span>roomId</span>
-                <input
-                  value={roomIdInput}
-                  onChange={(event) => setRoomIdInput(event.target.value)}
-                  placeholder="방 생성 후 자동 입력됩니다"
-                />
-              </label>
-              <label className="field">
-                <span>roomName</span>
-                <input
-                  value={roomNameInput}
-                  onChange={(event) => setRoomNameInput(event.target.value)}
-                  placeholder="데모 방"
-                />
-              </label>
-            </div>
-            <div className="room-actions">
-              <button className="button button--primary" onClick={handleCreateRoom}>
-                방 생성
-              </button>
-              <button className="button button--secondary" onClick={handleLoadRoom}>
-                방 조회
-              </button>
-              <button
-                className="button button--secondary"
-                onClick={handleJoinRoom}
-                disabled={!roomIdInput.trim() || !socket}
-              >
-                방 참가
-              </button>
-              <button
-                className="button button--secondary"
-                onClick={handleToggleReady}
-                disabled={!roomIdInput.trim() || !socket}
-              >
-                {isReady ? "Ready 해제" : "Ready 토글"}
-              </button>
-              <button
-                className="button button--primary"
-                onClick={handleStartGame}
-                disabled={!roomIdInput.trim() || !socket}
-              >
-                게임 시작
-              </button>
-            </div>
-            <div className="room-meta">
-              <span className="meta-value">
-                current room: <strong>{currentRoomId || "없음"}</strong>
-              </span>
-              <span className="meta-value">
-                room status: <strong>{room?.status ?? "UNKNOWN"}</strong>
-              </span>
-              <span className="meta-value">
-                {pendingRoomBusy ? "락이 바쁜 상태입니다." : "락 상태는 이벤트 로그를 확인하세요."}
-              </span>
-            </div>
-            <p className="section-note">
-              방 생성 후 host socket은 자동으로 방에 참가합니다. 실패하면 방 참가 버튼을 다시 누르세요.
-            </p>
-          </div>
-        </article>
+      {viewState === "ENTRY" ? (
+        <EntryScreen
+          identity={identity}
+          debugMode={debugMode}
+          isConnecting={socketStatus === "connecting"}
+          onEnter={handleEnterGame}
+          onNicknameChange={handleNicknameChange}
+          onTokenChange={(token) =>
+            setIdentity((current) => ({
+              ...current,
+              token,
+            }))
+          }
+        />
+      ) : null}
 
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="section-kicker">Connection</p>
-              <h2>연결과 복구 상태</h2>
-            </div>
-          </div>
-          <div className="panel-body">
-            <div className="summary-stack">
-              <div className="metric-card">
-                <span className="meta-label">socket</span>
-                <strong>{socketStatus}</strong>
-              </div>
-              <div className="metric-card">
-                <span className="meta-label">userId</span>
-                <strong>{currentUserId}</strong>
-              </div>
-              <div className="metric-card">
-                <span className="meta-label">roomId</span>
-                <strong>{currentRoomId || "없음"}</strong>
-              </div>
-              <div className="metric-card">
-                <span className="meta-label">reconnect</span>
-                <strong>{restored ? "restored" : "idle"}</strong>
-              </div>
-            </div>
-            <div className="connection-grid">
-              <div className="connection-card">
-                <span className="meta-label">reason</span>
-                <strong>{reconnectReason || "없음"}</strong>
-              </div>
-              <div className="connection-card">
-                <span className="meta-label">my role</span>
-                <strong>{myRole || "UNKNOWN"}</strong>
-              </div>
-              <div className="connection-card">
-                <span className="meta-label">my status</span>
-                <strong>{myStatus || "UNKNOWN"}</strong>
-              </div>
-              <div className="connection-card">
-                <span className="meta-label">connection</span>
-                <strong>{myConnectionStatus || "UNKNOWN"}</strong>
-              </div>
-            </div>
-            <p className="helper-text">
-              reconnect:state가 오면 room/session/player/recentChats/availableActions를
-              복구합니다.
-            </p>
-          </div>
-        </article>
+      {viewState === "ROOM_SETUP" || viewState === "LOBBY" ? (
+        <LobbyScreen
+          currentUserId={identity.userId}
+          isReady={isReady}
+          readyDisabled={readyDisabled}
+          room={room}
+          roomControlsDisabled={roomControlsDisabled}
+          roomIdInput={roomIdInput}
+          roomMode={roomMode}
+          roomNameInput={roomNameInput}
+          socketPresent={Boolean(socket)}
+          startDisabled={startDisabled}
+          viewState={viewState}
+          onCreateRoom={handleCreateRoom}
+          onDisconnect={handleDisconnectSocket}
+          onJoinRoom={handleJoinRoom}
+          onRoomIdChange={setRoomIdInput}
+          onRoomModeChange={setRoomMode}
+          onRoomNameChange={setRoomNameInput}
+          onStartGame={handleStartGame}
+          onToggleReady={handleToggleReady}
+        />
+      ) : null}
 
-        <article className="panel panel--wide">
-          <div className="panel-header">
-            <div>
-              <p className="section-kicker">Game State</p>
-              <h2>phase, turn, player 상태</h2>
-            </div>
-          </div>
-          <div className="panel-body">
-            <div className="summary-stack">
-              <div className="metric-card">
-                <span className="meta-label">phase</span>
-                <strong>{currentPhase}</strong>
-              </div>
-              <div className="metric-card">
-                <span className="meta-label">turn</span>
-                <strong>{currentTurn}</strong>
-              </div>
-              <div className="metric-card">
-                <span className="meta-label">participants</span>
-                <strong>{room?.participants.length ?? gamePlayers.length}</strong>
-              </div>
-              <div className="metric-card">
-                <span className="meta-label">available actions</span>
-                <strong>{effectiveAvailableActions.length}</strong>
-              </div>
-            </div>
-            <div className="room-card">
-              <span className="section-kicker">Players</span>
-              <div className="player-list">
-                {gamePlayers.length === 0 ? (
-                  <p className="connection-empty">아직 플레이어 정보가 없습니다.</p>
-                ) : (
-                  gamePlayers.map((player) => {
-                    const isMe = player.userId === identity.userId;
-                    return (
-                      <article
-                        key={player.userId}
-                        className={[
-                          "player-item",
-                          isMe ? "player-item--highlight" : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                      >
-                        <div className="player-item__header">
-                          <p className="player-item__name">
-                            {player.nickname ?? player.userId}
-                            {isMe ? " (me)" : ""}
-                          </p>
-                          <div className="player-item__meta">
-                            <span className="status-pill">{player.userId}</span>
-                            <span className={`status-pill ${statusClass(player.status)}`}>
-                              {player.status}
-                            </span>
-                            <span className={`status-pill ${statusClass(player.connectionStatus)}`}>
-                              {player.connectionStatus}
-                            </span>
-                            <span
-                              className={`status-pill ${
-                                isPlayerReady(room, player.userId)
-                                  ? "status-pill--good"
-                                  : "status-pill--warn"
-                              }`}
-                            >
-                              {isPlayerReady(room, player.userId) ? "READY" : "NOT READY"}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="player-item__meta">
-                          <span className="meta-value">
-                            role: <strong>{player.role || "UNKNOWN"}</strong>
-                          </span>
-                          {isMe ? (
-                            <span className="meta-value">
-                              ready: <strong>{isReady ? "READY" : "NOT READY"}</strong>
-                            </span>
-                          ) : null}
-                        </div>
-                      </article>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-            <div className="room-card">
-              <span className="section-kicker">Available Actions</span>
-              {effectiveAvailableActions.length === 0 ? (
-                <p className="connection-empty">
-                  현재 phase/role/status 기준 가능한 액션이 없습니다. 서버 reject가 최종 권한입니다.
-                </p>
-              ) : (
-                <div className="available-action-grid">
-                  {effectiveAvailableActions.map((action) => (
-                    <ActionCard
-                      key={actionKey(action)}
-                      action={action}
-                      players={gamePlayers}
-                      selectedTarget={targetSelections[action.type] ?? ""}
-                      onSelectTarget={(targetUserId) =>
-                        setTargetSelections((current) => ({
-                          ...current,
-                          [action.type]: targetUserId,
-                        }))
-                      }
-                      onExecute={handleTargetAction}
-                      onNextPhase={handleNextPhase}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </article>
+      {viewState === "GAME_NIGHT" ||
+      viewState === "GAME_DAY" ||
+      viewState === "GAME_VOTING" ||
+      viewState === "GAME_RESULT" ? (
+        <GameScreen
+          allowedChatChannels={allowedChatChannels}
+          canAdvancePhase={canAdvancePhase}
+          canSendChat={canSendChat}
+          chatChannel={chatChannel}
+          chatMessage={chatMessage}
+          chatMessages={chatMessages}
+          currentTurn={currentTurn}
+          currentUserId={identity.userId}
+          gameNotices={gameNotices}
+          myRole={myRole}
+          myStatus={myStatus}
+          phaseGuide={phaseGuide}
+          players={gamePlayers}
+          room={room}
+          targetAction={targetAction}
+          onChannelChange={setChatChannel}
+          onMessageChange={setChatMessage}
+          onNextPhase={handleNextPhase}
+          onSendChat={handleSendChat}
+          onTargetPlayerAction={handleTargetPlayerAction}
+        />
+      ) : null}
 
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="section-kicker">Chat</p>
-              <h2>채팅</h2>
-            </div>
-          </div>
-          <div className="panel-body">
-            <div className="channel-status-list">
-              <div className="meta-value">
-                선택 가능한 채널:{" "}
-                {visibleAllowedChannels.length > 0 ? (
-                  visibleAllowedChannels.map((channel) => (
-                    <span
-                      key={channel}
-                      className={`channel-pill channel-pill--${channel}`}
-                    >
-                      {channel}
-                    </span>
-                  ))
-                ) : (
-                  <span className="connection-empty">없음</span>
-                )}
-              </div>
-              <p className="section-note">
-                LOBBY는 대기실에서, DAY는 낮 토론에서, MAFIA는 밤 마피아 대화에서,
-                GHOST는 사망자에게 허용됩니다.
-              </p>
-            </div>
-            <div className="chat-inputs">
-              <label className="field">
-                <span>channel</span>
-                <select
-                  value={chatChannel}
-                  onChange={(event) => setChatChannel(event.target.value as typeof chatChannel)}
-                >
-                  {DEFAULT_CHAT_CHANNELS.map((channel) => (
-                    <option
-                      key={channel}
-                      value={channel}
-                      disabled={!isChannelAllowed(channel, room, effectiveAvailableActions)}
-                    >
-                      {channel}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>message</span>
-                <textarea
-                  value={chatMessage}
-                  onChange={(event) => setChatMessage(event.target.value)}
-                  placeholder="채팅 메시지"
-                />
-              </label>
-              <button className="button button--primary" onClick={handleSendChat}>
-                전송
-              </button>
-            </div>
-            <div className="chat-list">
-              {chatMessages.length === 0 ? (
-                <p className="connection-empty">아직 채팅이 없습니다.</p>
-              ) : (
-                chatMessages.map((message) => (
-                  <article key={message.id} className="chat-message">
-                    <div className="chat-message__header">
-                      <p className="chat-message__name">
-                        {message.senderUserId ?? "system"}
-                      </p>
-                      <div className="chat-message__meta">
-                        <span className={`channel-pill channel-pill--${message.channel}`}>
-                          {message.channel}
-                        </span>
-                        <span className="meta-value">{message.sentAt}</span>
-                      </div>
-                    </div>
-                    <p className="chat-message__body">{message.message}</p>
-                  </article>
-                ))
-              )}
-            </div>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="section-kicker">Event Log</p>
-              <h2>최근 100개 이벤트</h2>
-            </div>
-          </div>
-          <div className="panel-body">
-            <div className="event-log-list">
-              {eventLog.length === 0 ? (
-                <p className="connection-empty">이벤트가 아직 없습니다.</p>
-              ) : (
-                eventLog.map((entry) => (
-                  <article key={entry.id} className={`event-log-item event-log-item--${entry.kind}`}>
-                    <div className="event-log-item__header">
-                      <p className="event-log-item__name">{entry.title}</p>
-                      <div className="event-log-item__meta">
-                        <span className="status-pill">{entry.kind}</span>
-                        <span className="meta-value">{entry.timestamp}</span>
-                      </div>
-                    </div>
-                    <pre>{formatJson(entry.payload)}</pre>
-                  </article>
-                ))
-              )}
-            </div>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="section-kicker">Timeline Link</p>
-              <h2>결과 타임라인</h2>
-            </div>
-          </div>
-          <div className="panel-body">
-            {currentRoomId ? (
-              <Link
-                className="button button--primary"
-                href={`/games/${encodeURIComponent(currentRoomId)}/timeline`}
-              >
-                /games/{currentRoomId}/timeline
-              </Link>
-            ) : (
-              <p className="connection-empty">roomId가 있으면 타임라인 링크가 표시됩니다.</p>
-            )}
-          </div>
-        </article>
-      </section>
+      {debugMode ? (
+        <DebugLog eventLog={eventLog} formatEventSummary={formatEventSummary} />
+      ) : null}
     </main>
-  );
-}
-
-function ActionCard({
-  action,
-  players,
-  selectedTarget,
-  onSelectTarget,
-  onExecute,
-  onNextPhase,
-}: {
-  action: AvailableAction;
-  players: GameSessionPlayerView[];
-  selectedTarget: string;
-  onSelectTarget: (targetUserId: string) => void;
-  onExecute: (actionType: AvailableAction["type"]) => Promise<void>;
-  onNextPhase: () => Promise<void>;
-}) {
-  if (action.type === "NEXT_PHASE") {
-    return (
-      <article className="available-action">
-        <div className="available-action__header">
-          <div>
-            <p className="action-title">다음 phase</p>
-            <p className="helper-text">host만 사용할 수 있습니다.</p>
-          </div>
-          <button className="button button--primary" onClick={onNextPhase}>
-            실행
-          </button>
-        </div>
-      </article>
-    );
-  }
-
-  if (action.type === "SEND_CHAT_MESSAGE") {
-    return (
-      <article className="available-action">
-        <div className="available-action__header">
-          <div>
-            <p className="action-title">채팅 가능</p>
-            <p className="helper-text">
-              현재 선택된 channel은 채팅 섹션에서 전송됩니다.
-            </p>
-          </div>
-          {action.channel ? <span className={`channel-pill channel-pill--${action.channel}`}>{action.channel}</span> : null}
-        </div>
-      </article>
-    );
-  }
-
-  const targetUsers =
-    action.targetUserIds?.length
-      ? players.filter((player) => action.targetUserIds?.includes(player.userId))
-      : players;
-
-  return (
-    <article className="available-action">
-      <div className="available-action__header">
-        <div>
-          <p className="action-title">{getActionTitle(action.type)}</p>
-          <p className="helper-text">
-            {action.type}를 실행할 대상을 선택하세요.
-          </p>
-        </div>
-        <button
-          className="button button--secondary"
-          onClick={() => void onExecute(action.type)}
-          disabled={!selectedTarget}
-        >
-          실행
-        </button>
-      </div>
-      <div className="target-action-row">
-        <label className="field">
-          <span>target</span>
-          <select
-            value={selectedTarget}
-            onChange={(event) => onSelectTarget(event.target.value)}
-          >
-            {targetUsers.map((player) => (
-              <option key={player.userId} value={player.userId}>
-                {player.nickname || player.userId} ({player.userId})
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="available-action__targets">
-          {targetUsers.map((player) => (
-            <button
-              key={player.userId}
-              className={`button ${selectedTarget === player.userId ? "button--primary" : "button--secondary"}`}
-              onClick={() => onSelectTarget(player.userId)}
-            >
-              {player.nickname || player.userId}
-            </button>
-          ))}
-        </div>
-      </div>
-    </article>
   );
 }
 
@@ -1424,9 +1150,32 @@ function createDemoIdentity(): DemoIdentity {
   return {
     userId,
     email: `${userId}@example.com`,
-    nickname: userId,
+    nickname: "플레이어",
     token: "",
   };
+}
+
+function buildDemoCredentials(nickname: string) {
+  const normalized = nickname
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const base = normalized || `demo-user-${shortSuffix(4)}`;
+  const userId = `${base}-${shortSuffix(4)}`;
+
+  return {
+    userId,
+    email: `${userId}@example.com`,
+  };
+}
+
+function normalizeNickname(nickname: string) {
+  return nickname.trim().replace(/\s+/g, " ");
+}
+
+function isSocketConnected(socket: Socket | null): socket is Socket {
+  return Boolean(socket?.connected);
 }
 
 function createRequestId(prefix: string) {
@@ -1447,55 +1196,48 @@ function readLocalStorage(key: string) {
   return window.localStorage.getItem(key);
 }
 
-function formatJson(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function actionKey(action: AvailableAction) {
-  return `${action.type}:${action.channel ?? ""}:${action.targetUserIds?.join(",") ?? ""}`;
-}
-
-function getActionTitle(type: AvailableAction["type"]) {
-  switch (type) {
-    case "CAST_VOTE":
-      return "투표";
-    case "SELECT_MAFIA_TARGET":
-      return "마피아 target 선택";
-    case "SELECT_DOCTOR_TARGET":
-      return "의사 target 선택";
-    case "SELECT_POLICE_TARGET":
-      return "경찰 조사";
-    default:
-      return type;
-  }
-}
-
-function isChannelAllowed(
-  channel: "LOBBY" | "DAY" | "MAFIA" | "GHOST",
-  room: RoomView | null,
-  availableActions: AvailableAction[],
-) {
-  if (channel === "LOBBY") {
-    return room?.status === "WAITING";
+function readSessionStorage(key: string) {
+  if (typeof window === "undefined") {
+    return null;
   }
 
-  return availableActions.some(
-    (action) =>
-      action.type === "SEND_CHAT_MESSAGE" && action.channel === channel,
-  );
+  return window.sessionStorage.getItem(key);
 }
 
-function getAllowedChatChannels(
-  room: RoomView | null,
-  availableActions: AvailableAction[],
-) {
-  return DEFAULT_CHAT_CHANNELS.filter((channel) =>
-    isChannelAllowed(channel, room, availableActions),
-  );
+function formatEventSummary(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return "상세 정보 없음";
+  }
+
+  const current = payload as Record<string, unknown>;
+
+  if (typeof current.type === "string") {
+    switch (current.type) {
+      case "COMMAND_ACCEPTED":
+        return "요청 성공";
+      case "COMMAND_REJECTED":
+        return `요청 실패 · ${typeof current.reason === "string" ? commandRejectMessage(current.reason) : "알 수 없는 이유"}`;
+      default:
+        break;
+    }
+  }
+
+  const parts: string[] = [];
+
+  if (typeof current.nickname === "string") {
+    parts.push(current.nickname);
+  }
+  if (typeof current.channel === "string") {
+    parts.push(displayChatChannel(current.channel));
+  }
+  if (typeof current.phase === "string") {
+    parts.push(displayPhase(current.phase));
+  }
+  if (typeof current.toPhase === "string") {
+    parts.push(`${displayPhase(current.toPhase)}로 진행`);
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : "이벤트 수신";
 }
 
 function parseRoomPayload(payload: unknown): RoomView | null {
@@ -1678,6 +1420,28 @@ function updateSessionConnectionStatus(
   };
 }
 
+function updateSessionPlayerStatus(
+  current: GameSessionView | null,
+  userId: string,
+  status: string,
+  room: RoomView | null,
+  currentUserId: string,
+): GameSessionView {
+  const base = normalizeSession(current, room, currentUserId, {});
+
+  return {
+    ...base,
+    players: base.players.map((player) =>
+      player.userId === userId
+        ? {
+            ...player,
+            status,
+          }
+        : player,
+    ),
+  };
+}
+
 function buildChatKey(message: ChatMessageEvent) {
   return [
     message.gameId,
@@ -1688,20 +1452,67 @@ function buildChatKey(message: ChatMessageEvent) {
   ].join("|");
 }
 
-function statusClass(value: string) {
-  if (value === "CONNECTED" || value === "ALIVE" || value === "restored") {
-    return "status-pill--good";
+function findPlayerName(
+  session: GameSessionView | null,
+  room: RoomView | null,
+  userId: string | null,
+) {
+  if (!userId) {
+    return "대상 없음";
   }
 
-  if (value === "DISCONNECTED" || value === "DEAD") {
-    return "status-pill--bad";
+  return (
+    session?.players.find((player) => player.userId === userId)?.nickname ||
+    room?.participants.find((participant) => participant.userId === userId)?.nickname ||
+    userId
+  );
+}
+
+function formatNightResolution(
+  event: NightResolvedEvent,
+  session: GameSessionView | null,
+  room: RoomView | null,
+) {
+  if (event.killedUserId) {
+    return `밤 결과: ${findPlayerName(session, room, event.killedUserId)}이(가) 사망했습니다.`;
   }
 
-  if (value === "UNKNOWN" || value === "idle") {
-    return "status-pill--warn";
+  if (event.attackedUserId && event.protectedUserId === event.attackedUserId) {
+    return `밤 결과: ${findPlayerName(session, room, event.attackedUserId)}이(가) 습격당했지만 의사의 보호로 살아남았습니다.`;
   }
 
-  return "";
+  if (event.attackedUserId) {
+    return "밤 결과: 사망자는 없습니다.";
+  }
+
+  return "밤 결과: 아무도 습격하지 않았습니다.";
+}
+
+function formatVotingResolution(
+  event: VotingResolvedEvent,
+  session: GameSessionView | null,
+  room: RoomView | null,
+) {
+  if (event.executedUserId) {
+    return `투표 결과: ${findPlayerName(session, room, event.executedUserId)}이(가) 처형되었습니다.`;
+  }
+
+  return "투표 결과: 동률로 처형자가 없습니다.";
+}
+
+function getActionCompleteText(actionType: AvailableAction["type"]) {
+  switch (actionType) {
+    case "SELECT_MAFIA_TARGET":
+      return "습격 대상을 선택했습니다.";
+    case "SELECT_DOCTOR_TARGET":
+      return "보호 대상을 선택했습니다.";
+    case "SELECT_POLICE_TARGET":
+      return "조사를 요청했습니다.";
+    case "CAST_VOTE":
+      return "투표했습니다.";
+    default:
+      return "행동을 완료했습니다.";
+  }
 }
 
 function deriveAvailableActions(input: {
@@ -1739,6 +1550,9 @@ function deriveAvailableActions(input: {
   const alivePlayerIds = input.session.players
     .filter((player) => player.status === "ALIVE")
     .map((player) => player.userId);
+  const otherAlivePlayerIds = alivePlayerIds.filter(
+    (userId) => userId !== input.userId,
+  );
 
   const actions: AvailableAction[] = [];
 
@@ -1759,7 +1573,7 @@ function deriveAvailableActions(input: {
     if (effectiveRole === "MAFIA") {
       actions.push({
         type: "SELECT_MAFIA_TARGET",
-        targetUserIds: alivePlayerIds,
+        targetUserIds: otherAlivePlayerIds,
       });
       actions.push({ type: "SEND_CHAT_MESSAGE", channel: "MAFIA" });
     }
@@ -1767,14 +1581,14 @@ function deriveAvailableActions(input: {
     if (effectiveRole === "DOCTOR") {
       actions.push({
         type: "SELECT_DOCTOR_TARGET",
-        targetUserIds: alivePlayerIds,
+        targetUserIds: otherAlivePlayerIds,
       });
     }
 
     if (effectiveRole === "POLICE") {
       actions.push({
         type: "SELECT_POLICE_TARGET",
-        targetUserIds: alivePlayerIds,
+        targetUserIds: otherAlivePlayerIds,
       });
     }
   }

@@ -613,6 +613,10 @@ export class GameSessionService {
       throw new Error('target player is not alive');
     }
 
+    if (target.userId === actor.userId) {
+      throw new Error('target self is not allowed');
+    }
+
     const updatedSession: GameSession = {
       ...structuredClone(session),
       nightActions: {

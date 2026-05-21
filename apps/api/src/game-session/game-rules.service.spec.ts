@@ -207,6 +207,11 @@ test('night action role rules', async () => {
   );
 
   await assert.rejects(
+    () => service.selectMafiaTarget(gameId, 'user-1', 'user-1'),
+    /target self is not allowed/,
+  );
+
+  await assert.rejects(
     () => service.selectMafiaTarget(gameId, 'missing-actor', 'user-2'),
     /actor not found/,
   );

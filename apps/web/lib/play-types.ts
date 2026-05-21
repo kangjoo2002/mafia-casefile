@@ -61,6 +61,13 @@ export interface EventLogEntry {
   payload: unknown;
 }
 
+export interface GameNotice {
+  id: string;
+  timestamp: string;
+  kind: "info" | "success" | "error";
+  message: string;
+}
+
 export interface PlaySocketEventLog {
   eventName: string;
   payload: unknown;

@@ -202,7 +202,7 @@ test('session이 있고 player가 있으면 RESTORED', async () => {
       {
         type: 'SELECT_MAFIA_TARGET',
         channel: undefined,
-        targetUserIds: ['mafia-user', 'doctor-user', 'police-user', 'citizen-user'],
+        targetUserIds: ['doctor-user', 'police-user', 'citizen-user'],
       },
       {
         type: 'SEND_CHAT_MESSAGE',
@@ -263,7 +263,7 @@ test('alive non-mafia player는 MAFIA recent chat을 받지 않는다', async ()
     assert.deepEqual(result.availableActions, [
       {
         type: 'SELECT_DOCTOR_TARGET',
-        targetUserIds: ['mafia-user', 'doctor-user', 'police-user', 'citizen-user'],
+        targetUserIds: ['mafia-user', 'police-user', 'citizen-user'],
       },
     ]);
   } finally {

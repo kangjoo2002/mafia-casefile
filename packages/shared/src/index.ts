@@ -17,7 +17,10 @@ export type {
   AvailableActionType,
   ChatChannel,
   ChatMessageEvent,
+  GameFinishedEvent,
   GameStartedEvent,
+  InvestigationResultEvent,
+  NightResolvedEvent,
   ReconnectChatChannelSnapshot,
   ReconnectStateEvent,
   ReconnectStateReason,
@@ -26,5 +29,7 @@ export type {
   PlayerDisconnectedEvent,
   RoleAssignedEvent,
   SocketUser,
+  VoteTallyEntry,
+  VotingResolvedEvent,
   WhoamiEvent,
 } from "./socket";

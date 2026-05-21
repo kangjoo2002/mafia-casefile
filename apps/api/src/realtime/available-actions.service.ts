@@ -30,6 +30,9 @@ export class AvailableActionsService {
     const alivePlayerIds = input.session.players
       .filter((current) => current.status === 'ALIVE')
       .map((current) => current.userId);
+    const otherAlivePlayerIds = alivePlayerIds.filter(
+      (userId) => userId !== input.userId,
+    );
 
     if (input.session.hostUserId === input.userId) {
       actions.push({ type: 'NEXT_PHASE' });
@@ -46,7 +49,7 @@ export class AvailableActionsService {
       if (player.role === 'MAFIA') {
         actions.push({
           type: 'SELECT_MAFIA_TARGET',
-          targetUserIds: alivePlayerIds,
+          targetUserIds: otherAlivePlayerIds,
         });
         actions.push({
           type: 'SEND_CHAT_MESSAGE',
@@ -57,14 +60,14 @@ export class AvailableActionsService {
       if (player.role === 'DOCTOR') {
         actions.push({
           type: 'SELECT_DOCTOR_TARGET',
-          targetUserIds: alivePlayerIds,
+          targetUserIds: otherAlivePlayerIds,
         });
       }
 
       if (player.role === 'POLICE') {
         actions.push({
           type: 'SELECT_POLICE_TARGET',
-          targetUserIds: alivePlayerIds,
+          targetUserIds: otherAlivePlayerIds,
         });
       }
     }

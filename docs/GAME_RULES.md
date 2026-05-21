@@ -21,7 +21,10 @@
 - `SELECT_POLICE_TARGET`는 살아있는 경찰만 사용할 수 있다.
 - 죽은 player는 밤 액션을 할 수 없다.
 - 죽은 target은 밤 액션 대상이 될 수 없다.
+- 밤 액션은 자기 자신을 대상으로 사용할 수 없다.
 - 밤 액션 결과는 `GameSession.nightActions`에 반영되고, `GameEventLog`에도 기록된다.
+- 경찰 조사 결과는 경찰 player에게만 개인 이벤트로 전달된다.
+- 밤이 종료되면 사망자 또는 의사 보호로 생존한 target 정보가 room에 broadcast된다.
 
 ## 채팅
 

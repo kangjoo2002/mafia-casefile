@@ -65,6 +65,46 @@ export interface PhaseChangedEvent {
   changedAt: string;
 }
 
+export interface InvestigationResultEvent {
+  type: "investigation:result";
+  gameId: string;
+  targetUserId: string;
+  result: Role;
+  investigatedAt: string;
+}
+
+export interface NightResolvedEvent {
+  type: "night:resolved";
+  gameId: string;
+  turn: number;
+  attackedUserId: string | null;
+  protectedUserId: string | null;
+  killedUserId: string | null;
+  resolvedAt: string;
+}
+
+export interface VoteTallyEntry {
+  targetUserId: string;
+  count: number;
+}
+
+export interface VotingResolvedEvent {
+  type: "voting:resolved";
+  gameId: string;
+  turn: number;
+  executedUserId: string | null;
+  voteResult: VoteTallyEntry[];
+  resolvedAt: string;
+}
+
+export interface GameFinishedEvent {
+  type: "game:finished";
+  gameId: string;
+  winnerTeam: "MAFIA" | "CITIZEN";
+  reason: string;
+  finishedAt: string;
+}
+
 export interface PlayerDisconnectedEvent {
   type: "player:disconnected";
   gameId: string;
