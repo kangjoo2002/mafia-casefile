@@ -32,3 +32,11 @@ Mafia Casefile는 Socket.IO 기반 실시간 마피아 게임 서버와, 게임 
 - `POST /api/demo-token`은 로컬 데모용입니다.
 - UI의 availableActions는 reconnect snapshot 또는 client-side phase/role/status 계산을 기준으로 버튼을 표시하며, 실제 권한은 서버 command 검증이 최종 기준입니다.
 - 스크린샷과 GIF 정리는 다음 작업-045에서 진행합니다.
+
+## Deployment overview
+
+- API image는 GitHub Actions에서 GHCR로 push합니다.
+- OCI의 api-1/api-2 서버는 같은 image를 pull 받아 Docker Compose로 실행합니다.
+- infra 서버는 PostgreSQL/Redis를 제공합니다.
+- 현재 단계는 자동 SSH CD 전 단계이며, 배포는 서버에서 deploy script로 수동 실행합니다.
+- 자세한 내용은 `docs/DEPLOYMENT.md`를 참고합니다.
