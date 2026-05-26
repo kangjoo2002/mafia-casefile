@@ -41,6 +41,9 @@ jobs:
       - name: Generate Prisma client
         run: pnpm --filter api prisma:generate
 
+      - name: Build shared package
+        run: pnpm --filter @mafia-casefile/shared build
+
       - name: Lint API
         run: pnpm --filter api lint
 
