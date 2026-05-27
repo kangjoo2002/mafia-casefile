@@ -9,7 +9,9 @@
 
 1. GitHub Actions가 API Docker image를 GHCR에 push한다.
 2. GitHub Actions가 `mafia-api-1`, `mafia-api-2`에 SSH 접속해 `/opt/mafia-api` 기준으로 자동 배포한다.
-3. infra가 준비된 뒤 각 API 서버의 `.env`에서 실제 DB/Redis/JWT 값을 넣는다.
+3. `mafia-api-1` 배포 단계에서만 API Docker image 안의 `pnpm prisma:migrate:deploy`를 1회 실행한다.
+4. `mafia-api-2` 배포에서는 migration을 실행하지 않는다.
+5. infra가 준비된 뒤 각 API 서버의 `.env`에서 실제 DB/Redis/JWT 값을 넣는다.
 
 ## API 서버 최초 셋업
 
@@ -97,8 +99,23 @@ GHCR_READ_TOKEN
 1. `main`에 push되면 GitHub Actions가 `pnpm install`, `pnpm --filter api prisma:generate`, `pnpm --filter api lint`, `pnpm --filter api build`를 실행한다.
 2. 테스트가 통과하면 API Docker image를 빌드해 GHCR에 `sha-<github-sha>`와 `latest` 태그로 push한다.
 3. GitHub Actions가 `deploy/api/docker-compose.yml`과 `deploy/api/install-or-update-compose.sh`를 SSH로 서버에 올린 뒤 `mafia-api-1`의 `/opt/mafia-api`를 갱신하고 배포한다.
-4. `mafia-api-1` 배포가 성공한 뒤 `mafia-api-2`에 같은 절차를 수행한다.
-5. infra placeholder가 남아 있으면 배포는 `infra env placeholders are not configured yet` 메시지로 중단된다.
+4. `mafia-api-1` 배포 단계에서만 `RUN_MIGRATION=true`로 API Docker image 안의 `pnpm prisma:migrate:deploy`를 실행한다.
+5. migration이 성공하면 `mafia-api-1` 배포를 진행하고, 이후 `mafia-api-2`는 `RUN_MIGRATION=false`로 같은 절차를 수행한다.
+6. infra placeholder가 남아 있으면 배포는 `infra env placeholders are not configured yet` 메시지로 중단된다.
+
+## Migration 실행
+
+DB migration은 api-1 배포 단계에서 1회만 실행한다. GitHub Actions runner는 private DB에 직접 접근하지 않고, API Docker image 내부에서 migration을 수행한다.
+
+수동으로 실행할 때는 아래와 같이 image 안의 `pnpm prisma:migrate:deploy`를 호출한다.
+
+```bash
+cd /opt/mafia-api
+docker run --rm \
+  --env-file /opt/mafia-api/.env \
+  ghcr.io/kangjoo2002/mafia-casefile-api:${IMAGE_TAG} \
+  pnpm prisma:migrate:deploy
+```
 
 ## Rollback
 

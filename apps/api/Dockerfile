@@ -35,6 +35,7 @@ RUN pnpm --filter api build
 WORKDIR /app
 
 RUN pnpm --filter api deploy --prod --legacy /prod/api
+RUN cp -R /app/apps/api/prisma /prod/api/
 RUN cp -R /app/node_modules/.pnpm/@prisma+client@*/node_modules/.prisma \
   /prod/api/node_modules/.pnpm/@prisma+client@*/node_modules/
 RUN rm -rf /prod/api/src \

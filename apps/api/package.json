@@ -2,6 +2,7 @@
   "name": "api",
   "private": true,
   "type": "commonjs",
+  "packageManager": "pnpm@10.10.0",
   "scripts": {
     "start": "node dist/main.js",
     "start:dev": "tsx watch src/main.ts",
@@ -36,6 +37,7 @@
     "test:user-repository": "node --import tsx --test src/users/user.repository.spec.ts",
     "test:integration": "pnpm run test:auth && pnpm run test:user-repository && pnpm run test:redis && pnpm run test:game-event && pnpm run test:game-event-recorder && pnpm run test:game-event-timeline && pnpm run test:socket",
     "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:seed": "prisma db seed"
   },
@@ -49,20 +51,20 @@
     "@prisma/adapter-pg": "latest",
     "@prisma/client": "latest",
     "bcryptjs": "latest",
+    "dotenv": "latest",
     "ioredis": "latest",
     "jsonwebtoken": "latest",
     "pg": "latest",
     "reflect-metadata": "latest",
     "rxjs": "latest",
     "socket.io": "latest",
-    "socket.io-client": "latest"
+    "socket.io-client": "latest",
+    "prisma": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
     "@types/jsonwebtoken": "latest",
     "@types/pg": "latest",
-    "dotenv": "latest",
-    "prisma": "latest",
     "tsx": "latest",
     "typescript": "latest"
   },

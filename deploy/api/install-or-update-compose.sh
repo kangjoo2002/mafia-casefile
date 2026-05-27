@@ -7,6 +7,7 @@ GHCR_OWNER="${GHCR_OWNER:-}"
 IMAGE_TAG="${IMAGE_TAG:-}"
 API_CONTAINER_NAME="${API_CONTAINER_NAME:-}"
 API_PORT="${API_PORT:-3001}"
+RUN_MIGRATION="${RUN_MIGRATION:-false}"
 GHCR_READ_USERNAME="${GHCR_READ_USERNAME:-}"
 GHCR_READ_TOKEN="${GHCR_READ_TOKEN:-}"
 
@@ -109,6 +110,13 @@ if [ -z "$GHCR_READ_USERNAME" ] || [ -z "$GHCR_READ_TOKEN" ]; then
 fi
 
 printf '%s\n' "$GHCR_READ_TOKEN" | docker login ghcr.io -u "$GHCR_READ_USERNAME" --password-stdin >/dev/null
+
+image_ref="ghcr.io/${GHCR_OWNER}/mafia-casefile-api:${IMAGE_TAG}"
+
+if [ "$RUN_MIGRATION" = "true" ]; then
+  docker pull "$image_ref"
+  docker run --rm --env-file "$env_target" "$image_ref" pnpm prisma:migrate:deploy
+fi
 
 cd "$DEPLOY_DIR"
 docker compose pull

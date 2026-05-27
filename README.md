@@ -36,3 +36,4 @@ Mafia Casefile는 Socket.IO 기반 실시간 마피아 게임 서버와, 게임 
 ## Deployment overview
 
 API CI/CD는 GitHub Actions에서 API Docker image를 GHCR에 push한 뒤 OCI `api-1`/`api-2` 서버에 SSH로 순차 배포한다. 현재 infra 서버가 준비되기 전에는 API 서버의 `/opt/mafia-api/.env`가 placeholder 상태이므로 deploy job은 명확한 메시지와 함께 중단된다.
+API CD는 api-1 배포 단계에서 Prisma migration을 1회 실행한 뒤 api-1, api-2를 순차 배포한다.

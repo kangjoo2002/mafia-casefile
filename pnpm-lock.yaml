@@ -37,6 +37,9 @@ importers:
       bcryptjs:
         specifier: latest
         version: 3.0.3
+      dotenv:
+        specifier: latest
+        version: 17.4.2
       ioredis:
         specifier: latest
         version: 5.10.1
@@ -46,6 +49,9 @@ importers:
       pg:
         specifier: latest
         version: 8.20.0
+      prisma:
+        specifier: latest
+        version: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)
       reflect-metadata:
         specifier: latest
         version: 0.2.2
@@ -68,12 +74,6 @@ importers:
       '@types/pg':
         specifier: latest
         version: 8.20.0
-      dotenv:
-        specifier: latest
-        version: 17.4.2
-      prisma:
-        specifier: latest
-        version: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@6.0.3)
       tsx:
         specifier: latest
         version: 4.22.0
