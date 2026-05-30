@@ -32,6 +32,7 @@
     "test:reconnect-state": "node --import tsx --test src/realtime/reconnect-state.service.spec.ts",
     "test:reconnect-idempotency-lock": "node --import tsx --test src/realtime/realtime.reconnect-idempotency-lock.spec.ts",
     "test:request-idempotency": "node --import tsx --test src/realtime/request-idempotency.service.spec.ts",
+    "test:multi-instance": "node --import tsx --test src/rooms/rooms.multi-instance.spec.ts src/realtime/realtime.multi-instance.spec.ts",
     "test:redis": "node --import tsx --test src/redis/redis.service.spec.ts",
     "test:socket": "node --import tsx --test src/realtime/realtime.gateway.spec.ts",
     "test:user-repository": "node --import tsx --test src/users/user.repository.spec.ts",
