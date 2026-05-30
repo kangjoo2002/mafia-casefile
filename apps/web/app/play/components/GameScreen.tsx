@@ -136,7 +136,7 @@ export function GameScreen({
           ) : null}
           {!targetAction && !canAdvancePhase ? (
             <p className="connection-empty">
-              지금은 기다리는 시간입니다. 가능한 행동이 생기면 여기에 표시됩니다.
+              현재 가능한 행동이 없습니다. 다음 서버 이벤트를 기다리는 중입니다.
             </p>
           ) : null}
         </div>

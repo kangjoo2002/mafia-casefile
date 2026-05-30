@@ -44,12 +44,12 @@ export default async function TimelinePage({ params }: PageProps) {
         <div className="timeline-header__topline">
           <p className="eyebrow">Mafia Casefile</p>
           <Link className="home-link" href="/">
-            홈으로
+            홈
           </Link>
         </div>
-        <h1>게임 사건 타임라인</h1>
+        <h1>사건 타임라인</h1>
         <p className="timeline-subtitle">
-          gameId <code>{gameId}</code> 의 복기 화면입니다.
+          gameId <code>{gameId}</code> 기준으로 기록된 사건을 순서대로 복기합니다.
         </p>
       </header>
 
@@ -186,7 +186,10 @@ function TimelineEventCard({ event }: { event: TimelineEvent }) {
         </div>
       </dl>
 
-      <pre className="payload-block">{formatPayload(event.payload)}</pre>
+      <details className="payload-details">
+        <summary>원본 payload</summary>
+        <pre className="payload-block">{formatPayload(event.payload)}</pre>
+      </details>
     </article>
   );
 }

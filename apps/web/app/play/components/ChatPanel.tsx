@@ -80,7 +80,7 @@ export function ChatPanel({
         <textarea
           value={chatMessage}
           onChange={(event) => onMessageChange(event.target.value)}
-          placeholder="메시지를 입력하세요"
+          placeholder="대화 내용을 입력하세요"
         />
         <button
           className="button button--primary"

@@ -47,16 +47,17 @@ export function LobbyScreen({
     <section className="play-stage play-stage--lobby">
       <aside className="lobby-control">
         <p className="section-kicker">대기실</p>
-        <h1>{room ? room.name : "방을 만들거나 참가하세요"}</h1>
+        <h1>{room ? room.name : "새 사건 준비"}</h1>
         {room ? (
           <div className="room-code-card">
             <span>방 코드</span>
             <strong>{room.roomId}</strong>
+            <small>친구에게 이 코드를 공유하세요</small>
           </div>
         ) : null}
         {viewState === "LOBBY" ? (
           <p className="section-note">
-            참가 완료. 준비 버튼을 누르고 다른 플레이어를 기다리세요.
+            참가 완료. 모든 플레이어가 준비되면 방장이 게임을 시작할 수 있습니다.
           </p>
         ) : null}
         {viewState === "ROOM_SETUP" ? (
@@ -66,13 +67,13 @@ export function LobbyScreen({
                 className={`button ${roomMode === "create" ? "button--primary" : "button--secondary"}`}
                 onClick={() => onRoomModeChange("create")}
               >
-                새 방 만들기
+                방 만들기
               </button>
               <button
                 className={`button ${roomMode === "join" ? "button--primary" : "button--secondary"}`}
                 onClick={() => onRoomModeChange("join")}
               >
-                방 코드로 참가
+                코드 참가
               </button>
             </div>
             {roomMode === "create" ? (
@@ -119,7 +120,7 @@ export function LobbyScreen({
           onClick={onDisconnect}
           disabled={!socketPresent}
         >
-          나가기
+          연결 종료
         </button>
       </aside>
 
@@ -127,15 +128,16 @@ export function LobbyScreen({
         <div className="lobby-board__header">
           <div>
             <p className="section-kicker">참가자</p>
-            <h2>{room?.participants.length ?? 0} / {room?.maxPlayers ?? 4}</h2>
+            <h2>{room?.participants.length ?? 0}명 참가 중</h2>
           </div>
+          <span className="lobby-count">{room?.participants.length ?? 0} / {room?.maxPlayers ?? 4}</span>
           <div className="lobby-actions">
             <button
               className="button button--secondary"
               onClick={onToggleReady}
               disabled={readyDisabled}
             >
-              {isReady ? "준비 취소" : "준비했습니다"}
+              {isReady ? "준비 취소" : "준비 완료"}
             </button>
             <button
               className="button button--primary"
@@ -168,7 +170,7 @@ export function LobbyScreen({
               <article key={`empty-${index}`} className="seat-card seat-card--empty">
                 <span className="seat-number">{index + 1}</span>
                 <strong>빈 자리</strong>
-                <span className="meta-value">친구를 초대하세요</span>
+                <span className="meta-value">초대 대기 중</span>
               </article>
             ),
           )}

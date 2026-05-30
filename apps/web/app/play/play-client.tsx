@@ -1050,8 +1050,8 @@ export function PlayClient() {
   return (
     <main className="page play-page">
       <header className="play-topbar">
-        <Link className="button button--ghost" href="/">
-          홈
+        <Link className="topbar-brand" href="/">
+          <span>Mafia Casefile</span>
         </Link>
         <div className="play-topbar__identity">
           <strong>{connected ? identity.nickname : "입장 전"}</strong>

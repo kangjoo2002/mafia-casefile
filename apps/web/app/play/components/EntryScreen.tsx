@@ -19,10 +19,10 @@ export function EntryScreen({
     <section className="play-stage play-stage--entry">
       <div className="entry-card">
         <p className="section-kicker">Mafia Casefile</p>
-        <h1>이름만 정하면 바로 시작합니다</h1>
+        <h1>플레이어 프로필</h1>
         <p className="hero-copy">
-          4명이 같은 방에 들어와 준비하면 사건이 시작됩니다. 복잡한 설정은
-          뒤에서 자동으로 처리됩니다.
+          표시될 이름을 정하면 로비로 이동합니다. 방을 만들거나 초대 코드를
+          입력해 바로 참가할 수 있습니다.
         </p>
         <label className="field entry-name-field">
           <span>플레이어 이름</span>
@@ -38,7 +38,7 @@ export function EntryScreen({
           onClick={onEnter}
           disabled={isConnecting}
         >
-          {isConnecting ? "입장 중..." : "입장하기"}
+          {isConnecting ? "연결 중..." : "로비로 이동"}
         </button>
         {debugMode ? (
           <details className="debug-details">
