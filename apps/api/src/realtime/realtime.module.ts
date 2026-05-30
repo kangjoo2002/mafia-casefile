@@ -10,6 +10,7 @@ import { RequestIdempotencyService } from './request-idempotency.service';
 import { ReconnectStateService } from './reconnect-state.service';
 import { AvailableActionsService } from './available-actions.service';
 import { PersonalEventChannelService } from './personal-event-channel.service';
+import { PhaseTimerService } from './phase-timer.service';
 import { RealtimeGateway } from './realtime.gateway';
 
 @Module({
@@ -22,6 +23,7 @@ import { RealtimeGateway } from './realtime.gateway';
     ReconnectStateService,
     AvailableActionsService,
     PersonalEventChannelService,
+    PhaseTimerService,
     RealtimeGateway,
   ],
 })

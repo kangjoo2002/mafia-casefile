@@ -1,4 +1,9 @@
-import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -30,6 +35,10 @@ import {
   normalizeCommandRejectReason,
 } from '../game-commands/game-command.errors';
 import { PersonalEventChannelService } from './personal-event-channel.service';
+import {
+  PhaseTimerService,
+  type PhaseTimerEntry,
+} from './phase-timer.service';
 import { AuthenticatedSocket } from './socket-user';
 import type {
   CommandAcceptedEvent,
@@ -48,10 +57,16 @@ import type {
 })
 @Injectable()
 export class RealtimeGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+  implements
+    OnGatewayInit,
+    OnGatewayConnection,
+    OnGatewayDisconnect,
+    OnModuleDestroy
 {
   private readonly logger = new Logger(RealtimeGateway.name);
-  private readonly phaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private phaseTimerPoller: ReturnType<typeof setInterval> | null = null;
+  private readonly phaseTimerWakeups = new Set<ReturnType<typeof setTimeout>>();
+  private phaseTimerPollInProgress = false;
 
   @WebSocketServer()
   private server!: Server;
@@ -74,17 +89,26 @@ export class RealtimeGateway
     private readonly reconnectStateService: ReconnectStateService,
     @Inject(PersonalEventChannelService)
     private readonly personalEventChannelService: PersonalEventChannelService,
+    @Inject(PhaseTimerService)
+    private readonly phaseTimerService: PhaseTimerService,
   ) {}
 
   onModuleDestroy() {
-    for (const timer of this.phaseTimers.values()) {
-      clearTimeout(timer);
+    if (this.phaseTimerPoller) {
+      clearInterval(this.phaseTimerPoller);
+      this.phaseTimerPoller = null;
     }
 
-    this.phaseTimers.clear();
+    for (const wakeup of this.phaseTimerWakeups) {
+      clearTimeout(wakeup);
+    }
+
+    this.phaseTimerWakeups.clear();
   }
 
   afterInit(server: Server) {
+    this.startPhaseTimerPoller();
+
     server.use((socket, next) => {
       const token = socket.handshake.auth?.token;
 
@@ -321,7 +345,7 @@ export class RealtimeGateway
 
       if (effect.kind === 'broadcast') {
         this.emitBroadcast(effect);
-        this.schedulePhaseTimerFromEffect(effect);
+        await this.schedulePhaseTimerFromEffect(effect);
         await this.cacheChatMessageEffect(effect, cachedChatMessages);
         continue;
       }
@@ -340,12 +364,12 @@ export class RealtimeGateway
       }
 
       this.emitBroadcast(effect);
-      this.schedulePhaseTimerFromEffect(effect);
+      await this.schedulePhaseTimerFromEffect(effect);
       await this.cacheChatMessageEffect(effect, cachedChatMessages);
     }
   }
 
-  private schedulePhaseTimerFromEffect(effect: GameCommandBroadcastEffect) {
+  private async schedulePhaseTimerFromEffect(effect: GameCommandBroadcastEffect) {
     if (effect.eventName !== 'game:started' && effect.eventName !== 'phase:changed') {
       return;
     }
@@ -367,48 +391,75 @@ export class RealtimeGateway
       typeof payload.gameId !== 'string' ||
       typeof payload.phaseEndsAt !== 'string'
     ) {
-      this.clearPhaseTimer(effect.roomId);
+      await this.phaseTimerService.clearGame(effect.roomId);
       return;
     }
 
-    this.schedulePhaseTimer(payload.gameId, payload.phaseEndsAt);
+    await this.phaseTimerService.schedule({
+      gameId: payload.gameId,
+      phaseEndsAt: payload.phaseEndsAt,
+    });
+    this.schedulePhaseTimerWakeup(payload.phaseEndsAt);
   }
 
-  private schedulePhaseTimer(gameId: string, phaseEndsAt: string) {
+  private async pollDuePhaseTimers() {
+    if (this.phaseTimerPollInProgress) {
+      return;
+    }
+
+    this.phaseTimerPollInProgress = true;
+
+    try {
+      const entries = await this.phaseTimerService.listDue(
+        Date.now(),
+        this.resolvePhaseTimerDueLimit(),
+      );
+
+      await Promise.all(
+        entries.map((entry) => this.advancePhaseFromTimer(entry)),
+      );
+    } catch (error) {
+      this.logger.warn(`phase timer poll failed: ${this.formatError(error)}`);
+    } finally {
+      this.phaseTimerPollInProgress = false;
+    }
+  }
+
+  private startPhaseTimerPoller() {
+    if (this.phaseTimerPoller) {
+      return;
+    }
+
+    this.phaseTimerPoller = setInterval(() => {
+      void this.pollDuePhaseTimers();
+    }, this.resolvePhaseTimerPollIntervalMs());
+  }
+
+  private schedulePhaseTimerWakeup(phaseEndsAt: string) {
     const targetMs = Date.parse(phaseEndsAt);
 
     if (!Number.isFinite(targetMs)) {
       return;
     }
 
-    this.clearPhaseTimer(gameId);
+    const wakeup = setTimeout(() => {
+      this.phaseTimerWakeups.delete(wakeup);
+      void this.pollDuePhaseTimers();
+    }, Math.max(0, targetMs - Date.now()));
 
-    const delayMs = Math.max(0, targetMs - Date.now());
-    const timer = setTimeout(() => {
-      this.phaseTimers.delete(gameId);
-      void this.advancePhaseFromTimer(gameId, phaseEndsAt);
-    }, delayMs);
-
-    this.phaseTimers.set(gameId, timer);
+    this.phaseTimerWakeups.add(wakeup);
   }
 
-  private clearPhaseTimer(gameId: string) {
-    const existing = this.phaseTimers.get(gameId);
-
-    if (existing) {
-      clearTimeout(existing);
-      this.phaseTimers.delete(gameId);
-    }
-  }
-
-  private async advancePhaseFromTimer(gameId: string, expectedPhaseEndsAt: string) {
+  private async advancePhaseFromTimer(entry: PhaseTimerEntry) {
+    const { gameId, phaseEndsAt } = entry;
     const session = await this.gameSessionService.findByGameId(gameId);
 
     if (
       !session ||
       session.phase === 'FINISHED' ||
-      session.phaseEndsAt?.toISOString() !== expectedPhaseEndsAt
+      session.phaseEndsAt?.toISOString() !== phaseEndsAt
     ) {
+      await this.phaseTimerService.complete(entry);
       return;
     }
 
@@ -422,7 +473,6 @@ export class RealtimeGateway
     }
 
     if (!lock) {
-      this.schedulePhaseTimer(gameId, expectedPhaseEndsAt);
       return;
     }
 
@@ -431,7 +481,9 @@ export class RealtimeGateway
 
       if (result.type === 'COMMAND_ACCEPTED') {
         await this.applySystemCommandEffects(result.effects);
+        await this.phaseTimerService.complete(entry);
       } else {
+        await this.phaseTimerService.complete(entry);
         this.logger.warn(
           `automatic phase advance rejected ${gameId}: ${result.reason}`,
         );
@@ -443,6 +495,28 @@ export class RealtimeGateway
         this.warnGameCommandLockError('release timer', gameId, error);
       }
     }
+  }
+
+  private resolvePhaseTimerPollIntervalMs() {
+    const raw = process.env.PHASE_TIMER_POLL_INTERVAL_MS;
+
+    if (!raw) {
+      return 100;
+    }
+
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : 100;
+  }
+
+  private resolvePhaseTimerDueLimit() {
+    const raw = process.env.PHASE_TIMER_DUE_LIMIT;
+
+    if (!raw) {
+      return 100;
+    }
+
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : 100;
   }
 
   private async handleCommandWithoutIdempotency(
@@ -841,22 +915,19 @@ export class RealtimeGateway
     requestId: string,
     error: unknown,
   ) {
-    const message =
-      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    const message = this.formatError(error);
     this.logger.warn(
       `failed to ${action} idempotency for user ${userId}, game ${gameId}, request ${requestId}: ${message}`,
     );
   }
 
   private warnGameCommandLockError(action: string, gameId: string, error: unknown) {
-    const message =
-      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    const message = this.formatError(error);
     this.logger.warn(`failed to ${action} game command lock for game ${gameId}: ${message}`);
   }
 
   private warnChatCacheError(gameId: string, channel: string, error: unknown) {
-    const message =
-      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    const message = this.formatError(error);
     this.logger.warn(`failed to cache chat message for game ${gameId}, channel ${channel}: ${message}`);
   }
 
@@ -872,21 +943,26 @@ export class RealtimeGateway
   }
 
   private warnGameSessionDisconnectError(gameId: string, userId: string, error: unknown) {
-    const message =
-      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    const message = this.formatError(error);
     this.logger.warn(`failed to mark player disconnected for game ${gameId}, user ${userId}: ${message}`);
   }
 
   private warnGameSessionReconnectError(gameId: string, userId: string, error: unknown) {
-    const message =
-      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    const message = this.formatError(error);
     this.logger.warn(`failed to mark player connected for game ${gameId}, user ${userId}: ${message}`);
   }
 
   private warnReconnectStateError(gameId: string, userId: string, error: unknown) {
-    const message =
-      error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown error';
+    const message = this.formatError(error);
     this.logger.warn(`failed to build reconnect state for game ${gameId}, user ${userId}: ${message}`);
+  }
+
+  private formatError(error: unknown) {
+    return error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : 'unknown error';
   }
 
   private buildNoRoomReconnectState(userId: string): ReconnectStateEvent {

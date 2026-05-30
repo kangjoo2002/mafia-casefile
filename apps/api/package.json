@@ -24,6 +24,7 @@
     "test:game-e2e": "node --import tsx --test src/realtime/realtime.game-flow.e2e-spec.ts",
     "test:game-session": "node --import tsx --test src/game-session/game-session.repository.spec.ts",
     "test:game-command-lock": "node --import tsx --test src/realtime/game-command-lock.service.spec.ts",
+    "test:phase-timer": "node --import tsx --test src/realtime/phase-timer.service.spec.ts",
     "test:chat-cache": "node --import tsx --test src/realtime/chat-message-cache.service.spec.ts",
     "test:connection-state": "node --import tsx --test src/realtime/connection-state.service.spec.ts",
     "test:available-actions": "node --import tsx --test src/realtime/available-actions.service.spec.ts",

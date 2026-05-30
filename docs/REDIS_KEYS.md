@@ -48,6 +48,7 @@ test:550e8400-e29b-41d4-a716-446655440000:plain
 - `rooms:index`: room 목록 최신순 조회를 위한 sorted set. score는 room `createdAt` timestamp다.
 - `game-session:{gameId}`: 진행 중 GameSession 상태. 기본 TTL은 86400초이며 `GAME_SESSION_TTL_SECONDS`로 조정한다.
 - `SOCKET_IO_REDIS_KEY` 값: Socket.IO Redis Adapter Pub/Sub 채널 prefix. 기본값은 `{REDIS_KEY_PREFIX}:socket.io`다.
+- `phase-timers`: 자동 phase 전환 deadline sorted set. score는 `phaseEndsAt` timestamp이며 각 API 인스턴스가 poll하고 게임 lock으로 중복 전환을 막는다. 각 인스턴스는 짧은 로컬 wakeup으로 poll 지연을 줄이지만, 전환 기준은 Redis deadline이다. poll 주기와 처리 한도는 `PHASE_TIMER_POLL_INTERVAL_MS`, `PHASE_TIMER_DUE_LIMIT`로 조정한다.
 
 ## 주의
 
