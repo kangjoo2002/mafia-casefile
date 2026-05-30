@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer } from 'node:http';
 import { afterEach, test } from 'node:test';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
 import { Server as SocketServer } from 'socket.io';
 import { io, type Socket } from 'socket.io-client';
 
 const sockets: Socket[] = [];
 const socketServers: SocketServer[] = [];
 const httpServers: HttpServer[] = [];
+const redisClients: Redis[] = [];
 
 afterEach(async () => {
   for (const socket of sockets.splice(0)) {
@@ -30,6 +34,8 @@ afterEach(async () => {
         }),
     ),
   );
+
+  await Promise.all(redisClients.splice(0).map((client) => client.quit()));
 });
 
 test('기본 Socket.IO adapter는 다른 server instance에 연결된 socket으로 broadcast하지 않는다', async () => {
@@ -61,13 +67,62 @@ test('기본 Socket.IO adapter는 다른 server instance에 연결된 socket으�
   await otherInstanceEvent;
 });
 
-async function createSocketInstance() {
+test('Redis Socket.IO adapter는 다른 server instance에 연결된 socket에도 broadcast한다', async () => {
+  const adapterKey = `mafia-casefile-test:${randomUUID()}:socket.io`;
+  const instance1 = await createSocketInstance({ adapterKey });
+  const instance2 = await createSocketInstance({ adapterKey });
+  const roomId = 'room:multi-instance:redis';
+  const clientOnInstance1 = connectClient(instance1.url);
+  const clientOnInstance2 = connectClient(instance2.url);
+
+  await Promise.all([
+    waitForConnect(clientOnInstance1),
+    waitForConnect(clientOnInstance2),
+  ]);
+
+  await Promise.all([
+    joinTestRoom(clientOnInstance1, roomId),
+    joinTestRoom(clientOnInstance2, roomId),
+  ]);
+
+  await wait(50);
+
+  const sameInstanceEvent = waitForEvent<{ roomId: string }>(
+    clientOnInstance1,
+    'room:updated',
+  );
+  const otherInstanceEvent = waitForEvent<{ roomId: string }>(
+    clientOnInstance2,
+    'room:updated',
+  );
+
+  instance1.io.to(roomId).emit('room:updated', { roomId });
+
+  assert.deepEqual(await sameInstanceEvent, { roomId });
+  assert.deepEqual(await otherInstanceEvent, { roomId });
+});
+
+async function createSocketInstance(options: { adapterKey?: string } = {}) {
   const httpServer = createServer();
   const ioServer = new SocketServer(httpServer, {
     cors: {
       origin: '*',
     },
   });
+
+  if (options.adapterKey) {
+    const pubClient = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
+    const subClient = pubClient.duplicate();
+    redisClients.push(pubClient, subClient);
+
+    await Promise.all([pubClient.ping(), subClient.ping()]);
+
+    ioServer.adapter(
+      createAdapter(pubClient, subClient, {
+        key: options.adapterKey,
+      }),
+    );
+  }
 
   ioServer.on('connection', (socket) => {
     socket.on(
@@ -120,6 +175,12 @@ async function waitForConnect(socket: Socket) {
       clearTimeout(timeout);
       reject(error);
     });
+  });
+}
+
+async function wait(ms: number) {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
   });
 }
 
