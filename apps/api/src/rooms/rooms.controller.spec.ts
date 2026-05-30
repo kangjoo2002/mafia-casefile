@@ -2,10 +2,21 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { RoomsModule } from './rooms.module';
+import { InMemoryRoomRepository } from './in-memory-room.repository';
+import { ROOM_REPOSITORY } from './room.repository';
+import { RoomsController } from './rooms.controller';
+import { RoomsService } from './rooms.service';
 
 @Module({
-  imports: [RoomsModule],
+  controllers: [RoomsController],
+  providers: [
+    InMemoryRoomRepository,
+    {
+      provide: ROOM_REPOSITORY,
+      useExisting: InMemoryRoomRepository,
+    },
+    RoomsService,
+  ],
 })
 class RoomsTestModule {}
 

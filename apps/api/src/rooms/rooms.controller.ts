@@ -16,22 +16,22 @@ export class RoomsController {
   ) {}
 
   @Post()
-  create(@Body() body: { hostUserId?: string; name?: string; maxPlayers?: number }) {
+  async create(@Body() body: { hostUserId?: string; name?: string; maxPlayers?: number }) {
     return {
-      room: this.roomsService.createRoom(body),
+      room: await this.roomsService.createRoom(body),
     };
   }
 
   @Get()
-  list() {
+  async list() {
     return {
-      rooms: this.roomsService.listRooms(),
+      rooms: await this.roomsService.listRooms(),
     };
   }
 
   @Get(':roomId')
-  detail(@Param('roomId') roomId: string) {
-    const room = this.roomsService.findRoomById(roomId);
+  async detail(@Param('roomId') roomId: string) {
+    const room = await this.roomsService.findRoomById(roomId);
 
     if (!room) {
       throw new NotFoundException('room not found');

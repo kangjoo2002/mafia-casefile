@@ -2,34 +2,38 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
 Mafia Casefile은 Socket.IO 기반 실시간 게임 서버다. 운영 환경에서 API 서버가 2대 이상이면 사용자는 서로 다른 API 인스턴스에 연결될 수 있다.
 
-현재 `RoomsService`는 room 상태를 process-local `Map`에 저장한다. 또한 Socket.IO는 기본 in-memory adapter를 사용한다.
+초기 `RoomsService`는 room 상태를 process-local `Map`에 저장했다. 또한 Socket.IO는 기본 in-memory adapter를 사용한다.
 
 ## Evidence
 
-다음 characterization test는 현재 구조의 멀티 인스턴스 한계를 재현한다.
+다음 characterization test는 process-local 저장소와 기본 Socket.IO adapter의 멀티 인스턴스 한계를 재현한다.
 
 - `apps/api/src/rooms/rooms.multi-instance.spec.ts`
-  - 한 `RoomsService` 인스턴스에서 생성한 room은 다른 `RoomsService` 인스턴스에서 조회하거나 참가할 수 없다.
+  - process-local room 저장소는 다른 `RoomsService` 인스턴스와 room을 공유하지 않는다.
 - `apps/api/src/realtime/realtime.multi-instance.spec.ts`
   - 기본 Socket.IO adapter는 한 서버 인스턴스에서 broadcast한 이벤트를 다른 서버 인스턴스에 연결된 socket으로 전달하지 않는다.
+- `apps/api/src/rooms/redis-room.repository.spec.ts`
+  - Redis room 저장소는 room을 Redis key에 저장하고 목록 index를 유지한다.
+  - 다른 `RedisRoomRepository` 인스턴스에서도 저장된 room을 조회할 수 있다.
 
 검증 명령:
 
 ```bash
 pnpm --filter api test:multi-instance
+pnpm --filter api test:room-redis
 ```
 
 ## Decision
 
-멀티 인스턴스 운영을 지원하려면 다음 변경이 필요하다.
+멀티 인스턴스 운영을 지원하기 위해 다음 방향을 선택한다.
 
-1. Room 상태를 process-local `Map`에서 Redis 기반 저장소로 옮긴다.
+1. Room 상태를 process-local `Map`에서 Redis 기반 저장소로 옮긴다. 이 결정은 `RedisRoomRepository`로 적용한다.
 2. Socket.IO Redis Adapter를 적용해 room broadcast와 개인 이벤트를 인스턴스 간 전달한다.
 3. 자동 phase timer는 process-local `setTimeout`만으로 운영하지 않고 Redis/worker 기반 만료 처리로 이전한다.
 4. Redis snapshot과 PostgreSQL `GameEventLog`를 조합해 재접속 복구와 이벤트 보정을 수행한다.

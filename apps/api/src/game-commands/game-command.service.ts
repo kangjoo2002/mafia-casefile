@@ -175,7 +175,7 @@ export class GameCommandService {
     }
 
     try {
-      const room = this.roomsService.joinRoom(parsed.gameId, {
+      const room = await this.roomsService.joinRoom(parsed.gameId, {
         userId: user.id,
         nickname,
       });
@@ -233,7 +233,7 @@ export class GameCommandService {
     }
 
     try {
-      const room = this.roomsService.leaveRoom(parsed.gameId, user.id);
+      const room = await this.roomsService.leaveRoom(parsed.gameId, user.id);
 
       await this.gameEventRecorder.recordEvent({
         gameId: parsed.gameId,
@@ -308,7 +308,7 @@ export class GameCommandService {
     }
 
     try {
-      const room = this.roomsService.changeReady(
+      const room = await this.roomsService.changeReady(
         parsed.gameId,
         user.id,
         payload.isReady,
@@ -381,7 +381,7 @@ export class GameCommandService {
     void payload;
 
     try {
-      const room = this.roomsService.startGame(parsed.gameId, user.id);
+      const room = await this.roomsService.startGame(parsed.gameId, user.id);
       const startedAtDate = new Date();
       const startedAt = startedAtDate.toISOString();
       const roleAssignments = this.buildRoleAssignments(room);
@@ -519,7 +519,7 @@ export class GameCommandService {
     }
 
     try {
-      this.roomsService.assertCanAdvancePhase(parsed.gameId, user.id);
+      await this.roomsService.assertCanAdvancePhase(parsed.gameId, user.id);
 
       const transition = await this.gameSessionService.advancePhase(
         parsed.gameId,
@@ -1283,7 +1283,7 @@ export class GameCommandService {
     payload: ParsedChatCommandPayload,
     sentAt: string,
   ): Promise<GameCommandResult> {
-    const room = this.roomsService.findRoomById(parsed.gameId);
+    const room = await this.roomsService.findRoomById(parsed.gameId);
 
     if (!room) {
       return this.reject(

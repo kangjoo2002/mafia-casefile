@@ -267,7 +267,7 @@ async function createStartedGameContext(prefix: string) {
     waitForConnect(guest3.socket),
   ]);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: host.userId,
     name: `${prefix}-room`,
   });
@@ -350,7 +350,7 @@ test('room lifecycle events are recorded with contiguous seqs', async () => {
 
   await Promise.all([waitForConnect(host.socket), waitForConnect(guest.socket)]);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: host.userId,
     name: `lifecycle-room-${randomUUID()}`,
   });
@@ -667,7 +667,7 @@ test('lobby chat event visibility is recorded correctly', async () => {
 
   await Promise.all([waitForConnect(host.socket), waitForConnect(guest.socket)]);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: host.userId,
     name: `lobby-room-${randomUUID()}`,
   });
@@ -1146,7 +1146,7 @@ test('duplicate join request does not create duplicate GameEventLog', async () =
 
   await waitForConnect(host.socket);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: host.userId,
     name: `dup-room-${randomUUID()}`,
   });

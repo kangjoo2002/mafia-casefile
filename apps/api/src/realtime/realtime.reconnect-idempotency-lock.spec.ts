@@ -46,7 +46,7 @@ type CommandResponse = {
 };
 
 type StartedContext = {
-  room: ReturnType<RoomsService['createRoom']>;
+  room: Awaited<ReturnType<RoomsService['createRoom']>>;
   session: Awaited<ReturnType<GameSessionService['findByGameId']>>;
   socketsByUserId: Map<string, Socket>;
   sockets: Socket[];
@@ -286,7 +286,7 @@ async function createStartedGameContext(prefix: string): Promise<StartedContext>
     waitForConnect(players.guest3.socket),
   ]);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: players.host.userId,
     name: `${prefix}-room`,
   });
@@ -547,7 +547,7 @@ test('duplicate completed accepted JOIN_ROOM does not duplicate state or event',
 
   await waitForConnect(player.socket);
 
-  const room = roomsServiceLocal.createRoom({
+  const room = await roomsServiceLocal.createRoom({
     hostUserId: player.userId,
     name: `dup-join-room-${randomUUID()}`,
   });
@@ -570,7 +570,7 @@ test('duplicate completed accepted JOIN_ROOM does not duplicate state or event',
     assert.equal(secondResponse.type, 'COMMAND_ACCEPTED');
     assert.equal(firstResponse.requestId, secondResponse.requestId);
 
-    const refreshedRoom = roomsServiceLocal.findRoomById(room.roomId);
+    const refreshedRoom = await roomsServiceLocal.findRoomById(room.roomId);
     assert.ok(refreshedRoom);
     assert.equal(refreshedRoom?.participants.length, 1);
 
@@ -764,7 +764,7 @@ test('lock busy returns GAME_LOCK_BUSY and same requestId replays it', async () 
   const player = buildAuthedSocket(`lock-busy-${randomUUID()}`);
   await waitForConnect(player.socket);
 
-  const room = roomsServiceLocal.createRoom({
+  const room = await roomsServiceLocal.createRoom({
     hostUserId: player.userId,
     name: `lock-busy-room-${randomUUID()}`,
   });
@@ -834,7 +834,7 @@ test('lock busy 후 새 requestId로는 retry가 가능하다', async () => {
   const player = buildAuthedSocket(`lock-retry-${randomUUID()}`);
   await waitForConnect(player.socket);
 
-  const room = roomsServiceLocal.createRoom({
+  const room = await roomsServiceLocal.createRoom({
     hostUserId: player.userId,
     name: `lock-retry-room-${randomUUID()}`,
   });

@@ -741,7 +741,7 @@ test('room join and leave broadcast participant updates and record events', asyn
     email: 'room-guest@example.com',
   });
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'room-host-user',
     name: 'room-join-leave',
   });
@@ -1042,7 +1042,7 @@ test('room join and leave broadcast participant updates and record events', asyn
     [{ nickname: 'alpha', isReady: false }],
   );
 
-  const storedRoom = roomsService.findRoomById(room.roomId);
+  const storedRoom = await roomsService.findRoomById(room.roomId);
   assert.ok(storedRoom);
   assert.equal(storedRoom?.playerCount, 1);
   assert.deepEqual(
@@ -1121,7 +1121,7 @@ test('disconnect marks player disconnected and broadcasts to the room', async ()
     email: 'disconnect-guest3@example.com',
   });
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'disconnect-host-user',
     name: 'disconnect-room',
   });
@@ -1219,7 +1219,7 @@ test('lock busy reconnect still restores reconnect state from previous room', as
     email: 'reconnect-guest3@example.com',
   });
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'reconnect-host-user',
     name: 'reconnect-room',
   });
@@ -1323,7 +1323,7 @@ test('duplicate completed accepted command does not create duplicate event', asy
     email: 'dup-host@example.com',
   });
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'dup-host-user',
     name: 'duplicate-join',
   });
@@ -1401,7 +1401,7 @@ test('game command lock busy rejects command and allows retry with new requestId
     email: 'lock-host@example.com',
   });
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'lock-host-user',
     name: 'lock-room',
   });
@@ -1465,7 +1465,7 @@ test('lobby chat broadcasts and records messages', async () => {
   const roomsService = app.get(RoomsService);
   const chatMessageCacheService = app.get(ChatMessageCacheService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-lobby-host',
     name: 'chat-lobby',
   });
@@ -1561,7 +1561,7 @@ test('lobby chat broadcasts and records messages', async () => {
 test('lobby chat rejects non-participant', async () => {
   const roomsService = app.get(RoomsService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-lobby-outsider-host',
     name: 'chat-lobby-outsider',
   });
@@ -1592,7 +1592,7 @@ test('lobby chat rejects non-participant', async () => {
 test('lobby chat rejects after game start', async () => {
   const roomsService = app.get(RoomsService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-lobby-start-host',
     name: 'chat-lobby-start',
   });
@@ -1668,7 +1668,7 @@ test('day chat broadcasts and records messages', async () => {
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-day-host',
     name: 'chat-day',
   });
@@ -1782,7 +1782,7 @@ test('day chat broadcasts and records messages', async () => {
 test('day chat rejects outside DAY_DISCUSSION', async () => {
   const roomsService = app.get(RoomsService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-day-night-host',
     name: 'chat-day-night',
   });
@@ -1858,7 +1858,7 @@ test('day chat rejects dead player', async () => {
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-day-dead-host',
     name: 'chat-day-dead',
   });
@@ -2006,7 +2006,7 @@ test('mafia chat sends only to alive mafia players', async () => {
   const gameSessionService = app.get(GameSessionService);
   const chatMessageCacheService = app.get(ChatMessageCacheService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-mafia-host',
     name: 'chat-mafia',
   });
@@ -2175,7 +2175,7 @@ test('mafia chat rejects non-mafia and outside NIGHT', async () => {
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-mafia-reject-host',
     name: 'chat-mafia-reject',
   });
@@ -2330,7 +2330,7 @@ test('ghost chat sends only to dead players', async () => {
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-ghost-host',
     name: 'chat-ghost',
   });
@@ -2526,7 +2526,7 @@ test('ghost chat rejects alive player and system channel still rejects', async (
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'chat-ghost-reject-host',
     name: 'chat-ghost-reject',
   });
@@ -2731,7 +2731,7 @@ test('invalid chat payloads are rejected', async () => {
 test('start game rejects when room is too small', async () => {
   const roomsService = app.get(RoomsService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'small-room-host',
     name: 'small-room',
   });
@@ -2765,7 +2765,7 @@ test('start game rejects when room is too small', async () => {
   assert.equal(response.reason, 'ROOM_TOO_SMALL');
   assert.equal(response.message, 'room needs at least 4 players');
 
-  const storedRoom = roomsService.findRoomById(room.roomId);
+  const storedRoom = await roomsService.findRoomById(room.roomId);
   assert.ok(storedRoom);
   assert.equal(storedRoom?.status, 'WAITING');
 
@@ -2783,7 +2783,7 @@ test('start game rejects when room is too small', async () => {
 test('start game rejects non-host, requires all ready, and starts room', async () => {
   const roomsService = app.get(RoomsService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'start-room-host',
     name: 'start-room',
   });
@@ -2955,7 +2955,7 @@ test('start game rejects non-host, requires all ready, and starts room', async (
     ['CITIZEN', 'DOCTOR', 'MAFIA', 'POLICE'].sort(),
   );
 
-  const storedRoom = roomsService.findRoomById(room.roomId);
+  const storedRoom = await roomsService.findRoomById(room.roomId);
   assert.ok(storedRoom);
   assert.equal(storedRoom?.status, 'IN_PROGRESS');
   assert.equal(storedRoom?.playerCount, 4);
@@ -3034,7 +3034,7 @@ test('phase timer automatically advances the game and broadcasts phase change', 
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'auto-phase-host',
     name: 'auto-phase-room',
   });
@@ -3122,7 +3122,7 @@ test('next phase advances the session and broadcasts phase changes', async () =>
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'phase-room-host',
     name: 'phase-room',
   });
@@ -3301,7 +3301,7 @@ test('night actions require the right role and record selections', async () => {
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'night-room-host',
     name: 'night-room',
   });
@@ -3609,7 +3609,7 @@ test('cast vote records one vote per user and deduplicates request ids', async (
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'vote-room-host',
     name: 'vote-room',
   });

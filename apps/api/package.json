@@ -16,6 +16,7 @@
     "test:game-event-recorder": "node --import tsx --test src/game-events/game-event-recorder.service.spec.ts",
     "test:game-event-timeline": "node --import tsx --test src/game-events/game-events.controller.spec.ts",
     "test:game-session-redis": "node --import tsx --test src/game-session/redis-game-session.repository.spec.ts",
+    "test:room-redis": "node --import tsx --test src/rooms/redis-room.repository.spec.ts",
     "test:game-session-module": "node --import tsx --test src/game-session/game-session.module.spec.ts",
     "test:game-session-disconnect": "node --import tsx --test src/game-session/game-session.disconnect.spec.ts",
     "test:game-session-reconnect": "node --import tsx --test src/game-session/game-session.reconnect.spec.ts",

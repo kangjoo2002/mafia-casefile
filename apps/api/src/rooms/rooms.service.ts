@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { ROOM_REPOSITORY, type RoomRepository } from './room.repository';
 
 export type RoomStatus = 'WAITING' | 'IN_PROGRESS' | 'FINISHED';
 
@@ -45,9 +46,11 @@ function normalizeRoom(room: Room): Room {
 
 @Injectable()
 export class RoomsService {
-  private readonly rooms = new Map<string, Room>();
+  constructor(
+    @Inject(ROOM_REPOSITORY) private readonly repository: RoomRepository,
+  ) {}
 
-  createRoom(input: CreateRoomInput): Room {
+  async createRoom(input: CreateRoomInput): Promise<Room> {
     if (!isNonEmptyString(input?.hostUserId)) {
       throw new BadRequestException('hostUserId is required');
     }
@@ -89,29 +92,26 @@ export class RoomsService {
     };
 
     const snapshot = normalizeRoom(room);
-    this.rooms.set(room.roomId, snapshot);
-    return cloneRoom(snapshot);
+    return await this.repository.save(snapshot);
   }
 
-  listRooms(): Room[] {
-    return [...this.rooms.values()]
-      .reverse()
-      .map((room) => cloneRoom(room));
+  async listRooms(): Promise<Room[]> {
+    return await this.repository.list();
   }
 
-  findRoomById(roomId: string): Room | null {
+  async findRoomById(roomId: string): Promise<Room | null> {
     if (!isNonEmptyString(roomId)) {
       return null;
     }
 
-    const room = this.rooms.get(roomId);
+    const room = await this.repository.findById(roomId);
     return room ? cloneRoom(normalizeRoom(room)) : null;
   }
 
-  joinRoom(
+  async joinRoom(
     roomId: string,
     participant: { userId: string; nickname: string },
-  ): Room {
+  ): Promise<Room> {
     if (!isNonEmptyString(roomId)) {
       throw new BadRequestException('roomId is required');
     }
@@ -124,7 +124,7 @@ export class RoomsService {
       throw new BadRequestException('nickname is required');
     }
 
-    const room = this.rooms.get(roomId);
+    const room = await this.repository.findById(roomId);
     if (!room) {
       throw new BadRequestException('room not found');
     }
@@ -158,11 +158,10 @@ export class RoomsService {
 
     room.updatedAt = now;
     const snapshot = normalizeRoom(room);
-    this.rooms.set(roomId, snapshot);
-    return cloneRoom(snapshot);
+    return await this.repository.save(snapshot);
   }
 
-  startGame(roomId: string, userId: string): Room {
+  async startGame(roomId: string, userId: string): Promise<Room> {
     if (!isNonEmptyString(roomId)) {
       throw new BadRequestException('roomId is required');
     }
@@ -171,7 +170,7 @@ export class RoomsService {
       throw new BadRequestException('userId is required');
     }
 
-    const room = this.rooms.get(roomId);
+    const room = await this.repository.findById(roomId);
     if (!room) {
       throw new BadRequestException('room not found');
     }
@@ -196,11 +195,10 @@ export class RoomsService {
     room.updatedAt = new Date();
 
     const snapshot = normalizeRoom(room);
-    this.rooms.set(roomId, snapshot);
-    return cloneRoom(snapshot);
+    return await this.repository.save(snapshot);
   }
 
-  assertCanAdvancePhase(roomId: string, userId: string): Room {
+  async assertCanAdvancePhase(roomId: string, userId: string): Promise<Room> {
     if (!isNonEmptyString(roomId)) {
       throw new BadRequestException('roomId is required');
     }
@@ -209,7 +207,7 @@ export class RoomsService {
       throw new BadRequestException('userId is required');
     }
 
-    const room = this.rooms.get(roomId);
+    const room = await this.repository.findById(roomId);
     if (!room) {
       throw new BadRequestException('room not found');
     }
@@ -225,7 +223,7 @@ export class RoomsService {
     return cloneRoom(normalizeRoom(room));
   }
 
-  changeReady(roomId: string, userId: string, isReady: boolean): Room {
+  async changeReady(roomId: string, userId: string, isReady: boolean): Promise<Room> {
     if (!isNonEmptyString(roomId)) {
       throw new BadRequestException('roomId is required');
     }
@@ -238,7 +236,7 @@ export class RoomsService {
       throw new BadRequestException('isReady must be a boolean');
     }
 
-    const room = this.rooms.get(roomId);
+    const room = await this.repository.findById(roomId);
     if (!room) {
       throw new BadRequestException('room not found');
     }
@@ -259,11 +257,10 @@ export class RoomsService {
     room.updatedAt = new Date();
 
     const snapshot = normalizeRoom(room);
-    this.rooms.set(roomId, snapshot);
-    return cloneRoom(snapshot);
+    return await this.repository.save(snapshot);
   }
 
-  leaveRoom(roomId: string, userId: string): Room {
+  async leaveRoom(roomId: string, userId: string): Promise<Room> {
     if (!isNonEmptyString(roomId)) {
       throw new BadRequestException('roomId is required');
     }
@@ -272,7 +269,7 @@ export class RoomsService {
       throw new BadRequestException('userId is required');
     }
 
-    const room = this.rooms.get(roomId);
+    const room = await this.repository.findById(roomId);
     if (!room) {
       throw new BadRequestException('room not found');
     }
@@ -289,7 +286,6 @@ export class RoomsService {
     room.updatedAt = new Date();
 
     const snapshot = normalizeRoom(room);
-    this.rooms.set(roomId, snapshot);
-    return cloneRoom(snapshot);
+    return await this.repository.save(snapshot);
   }
 }

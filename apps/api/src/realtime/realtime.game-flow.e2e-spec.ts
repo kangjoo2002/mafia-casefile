@@ -248,7 +248,7 @@ test('game flow e2e covers a full citizen win', async () => {
   const roomsService = app.get(RoomsService);
   const gameSessionService = app.get(GameSessionService);
 
-  const room = roomsService.createRoom({
+  const room = await roomsService.createRoom({
     hostUserId: 'e2e-host',
     name: 'e2e-game-flow',
   });
