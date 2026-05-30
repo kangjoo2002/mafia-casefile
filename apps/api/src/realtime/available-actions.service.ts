@@ -57,12 +57,12 @@ export class AvailableActionsService {
         });
       }
 
-      if (player.role === 'DOCTOR') {
-        actions.push({
-          type: 'SELECT_DOCTOR_TARGET',
-          targetUserIds: otherAlivePlayerIds,
-        });
-      }
+    if (player.role === 'DOCTOR') {
+      actions.push({
+        type: 'SELECT_DOCTOR_TARGET',
+          targetUserIds: alivePlayerIds,
+      });
+    }
 
       if (player.role === 'POLICE') {
         actions.push({

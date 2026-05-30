@@ -1581,7 +1581,7 @@ function deriveAvailableActions(input: {
     if (effectiveRole === "DOCTOR") {
       actions.push({
         type: "SELECT_DOCTOR_TARGET",
-        targetUserIds: otherAlivePlayerIds,
+        targetUserIds: alivePlayerIds,
       });
     }
 

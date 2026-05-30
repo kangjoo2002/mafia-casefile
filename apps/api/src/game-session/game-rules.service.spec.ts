@@ -135,6 +135,48 @@ test('night action phase rules', async () => {
   );
 });
 
+test('night action은 역할별로 한 번만 선택할 수 있고 의사는 자기 자신을 보호할 수 있다', async () => {
+  const { service } = createService();
+  const gameId = randomUUID();
+  await seedSession(service, gameId);
+
+  const doctorSelfTarget = await service.selectDoctorTarget(
+    gameId,
+    'user-2',
+    'user-2',
+  );
+  assert.equal(doctorSelfTarget.target.userId, 'user-2');
+
+  await assert.rejects(
+    () => service.selectDoctorTarget(gameId, 'user-2', 'user-1'),
+    /night action already selected/,
+  );
+
+  const mafiaTarget = await service.selectMafiaTarget(
+    gameId,
+    'user-1',
+    'user-4',
+  );
+  assert.equal(mafiaTarget.target.userId, 'user-4');
+
+  await assert.rejects(
+    () => service.selectMafiaTarget(gameId, 'user-1', 'user-3'),
+    /night action already selected/,
+  );
+
+  const policeTarget = await service.selectPoliceTarget(
+    gameId,
+    'user-3',
+    'user-1',
+  );
+  assert.equal(policeTarget.target.userId, 'user-1');
+
+  await assert.rejects(
+    () => service.selectPoliceTarget(gameId, 'user-3', 'user-4'),
+    /night action already selected/,
+  );
+});
+
 test('night action role rules', async () => {
   const { service, repository } = createService();
   const gameId = randomUUID();
@@ -208,6 +250,11 @@ test('night action role rules', async () => {
 
   await assert.rejects(
     () => service.selectMafiaTarget(gameId, 'user-1', 'user-1'),
+    /target self is not allowed/,
+  );
+
+  await assert.rejects(
+    () => service.selectPoliceTarget(gameId, 'user-3', 'user-3'),
     /target self is not allowed/,
   );
 

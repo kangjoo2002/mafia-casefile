@@ -613,7 +613,11 @@ export class GameSessionService {
       throw new Error('target player is not alive');
     }
 
-    if (target.userId === actor.userId) {
+    if (session.nightActions[targetKey]) {
+      throw new Error('night action already selected');
+    }
+
+    if (target.userId === actor.userId && targetKey !== 'doctorTarget') {
       throw new Error('target self is not allowed');
     }
 

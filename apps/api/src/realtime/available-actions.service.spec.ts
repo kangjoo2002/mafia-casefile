@@ -187,7 +187,7 @@ test('NIGHT phase의 살아있는 DOCTOR는 doctor target action을 받는다', 
     {
       type: 'SELECT_DOCTOR_TARGET',
       channel: undefined,
-      targetUserIds: ['host-user'],
+      targetUserIds: ['host-user', 'doctor-user'],
     },
   ]);
 });

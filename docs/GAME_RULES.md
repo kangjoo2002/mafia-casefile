@@ -19,6 +19,9 @@
 - `SELECT_MAFIA_TARGET`는 살아있는 마피아만 사용할 수 있다.
 - `SELECT_DOCTOR_TARGET`는 살아있는 의사만 사용할 수 있다.
 - `SELECT_POLICE_TARGET`는 살아있는 경찰만 사용할 수 있다.
+- 밤 능력은 역할별로 한 밤에 한 번만 선택할 수 있다.
+- 마피아와 경찰은 자기 자신을 대상으로 선택할 수 없다.
+- 의사는 자기 자신을 보호할 수 있다.
 - 죽은 player는 밤 액션을 할 수 없다.
 - 죽은 target은 밤 액션 대상이 될 수 없다.
 - 밤 액션은 자기 자신을 대상으로 사용할 수 없다.
@@ -47,7 +50,7 @@
 - `NEXT_PHASE`는 방장에게만 제공된다.
 - `CAST_VOTE`는 `VOTING` phase의 살아 있는 player에게 제공된다.
 - `SELECT_MAFIA_TARGET`는 `NIGHT` phase의 살아 있는 마피아에게 제공된다.
-- `SELECT_DOCTOR_TARGET`는 `NIGHT` phase의 살아 있는 의사에게 제공된다.
+- `SELECT_DOCTOR_TARGET`는 `NIGHT` phase의 살아 있는 의사에게 제공되며 자기 자신도 대상에 포함된다.
 - `SELECT_POLICE_TARGET`는 `NIGHT` phase의 살아 있는 경찰에게 제공된다.
 - `SEND_CHAT_MESSAGE`의 `DAY`는 `DAY_DISCUSSION` phase의 살아 있는 player에게 제공된다.
 - `SEND_CHAT_MESSAGE`의 `MAFIA`는 `NIGHT` phase의 살아 있는 마피아에게 제공된다.
