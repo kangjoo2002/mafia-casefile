@@ -110,7 +110,7 @@ test('FINISHED phase는 availableActions가 없다', () => {
   );
 });
 
-test('host는 NEXT_PHASE를 받는다', () => {
+test('host도 phase 수동 진행 action은 받지 않는다', () => {
   const session = createSession({
     phase: 'DAY_DISCUSSION',
     hostUserId: 'host-user',
@@ -118,7 +118,6 @@ test('host는 NEXT_PHASE를 받는다', () => {
   });
 
   assert.deepEqual(summarize(service.buildForPlayer({ session, userId: 'host-user' })), [
-    { type: 'NEXT_PHASE', channel: undefined, targetUserIds: undefined },
     { type: 'SEND_CHAT_MESSAGE', channel: 'DAY', targetUserIds: undefined },
   ]);
 });

@@ -34,10 +34,6 @@ export class AvailableActionsService {
       (userId) => userId !== input.userId,
     );
 
-    if (input.session.hostUserId === input.userId) {
-      actions.push({ type: 'NEXT_PHASE' });
-    }
-
     if (input.session.phase === 'VOTING' && player.status === 'ALIVE') {
       actions.push({
         type: 'CAST_VOTE',

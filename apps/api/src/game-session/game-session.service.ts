@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type {
   ConnectionStatus,
+  GamePhase,
   PlayerStatus,
   Role,
 } from '@mafia-casefile/shared';
@@ -27,6 +28,7 @@ export interface StartGameSessionInput {
   hostUserId: string;
   players: StartGameSessionPlayerInput[];
   startedAt?: Date;
+  phaseEndsAt?: Date | null;
 }
 
 export interface NightActionSelectionResult {
@@ -49,6 +51,13 @@ export interface VoteCastResult {
 }
 
 export type WinnerTeam = 'MAFIA' | 'CITIZEN';
+
+const DEFAULT_PHASE_DURATION_SECONDS: Partial<Record<GamePhase, number>> = {
+  NIGHT: 60,
+  DAY_DISCUSSION: 180,
+  VOTING: 60,
+  RESULT: 10,
+};
 
 export interface NightOutcomeResult {
   session: GameSession;
@@ -83,6 +92,10 @@ export class GameSessionService {
     input: StartGameSessionInput,
   ): Promise<GameSession> {
     const startedAt = input.startedAt ?? new Date();
+    const phaseEndsAt =
+      input.phaseEndsAt === undefined
+        ? this.calculatePhaseEndsAt('NIGHT', startedAt)
+        : input.phaseEndsAt;
     const session: GameSession = {
       gameId: input.gameId,
       roomId: input.roomId,
@@ -95,7 +108,7 @@ export class GameSessionService {
       ),
       votes: {},
       nightActions: {},
-      phaseEndsAt: null,
+      phaseEndsAt,
       processedRequests: {},
       createdAt: startedAt,
       updatedAt: startedAt,
@@ -112,6 +125,10 @@ export class GameSessionService {
     }
 
     const transition = this.stateMachine.advance(session);
+    transition.session.phaseEndsAt = this.calculatePhaseEndsAt(
+      transition.toPhase,
+      transition.session.updatedAt,
+    );
     const saved = await this.repository.save(transition.session);
 
     return {
@@ -566,6 +583,28 @@ export class GameSessionService {
     }
 
     return null;
+  }
+
+  private calculatePhaseEndsAt(phase: GamePhase, from: Date): Date | null {
+    const seconds = this.getPhaseDurationSeconds(phase);
+
+    if (seconds === null) {
+      return null;
+    }
+
+    return new Date(from.getTime() + seconds * 1000);
+  }
+
+  private getPhaseDurationSeconds(phase: GamePhase): number | null {
+    const envKey = `MAFIA_PHASE_${phase}_SECONDS`;
+    const raw = process.env[envKey];
+    const parsed = raw === undefined ? NaN : Number(raw);
+
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+
+    return DEFAULT_PHASE_DURATION_SECONDS[phase] ?? null;
   }
 
   private async selectNightAction(

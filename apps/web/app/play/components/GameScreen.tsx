@@ -1,4 +1,7 @@
+"use client";
+
 import type { AvailableAction } from "@mafia-casefile/shared";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ChatMessageView,
   GameNotice,
@@ -27,6 +30,7 @@ export function GameScreen({
   gameNotices,
   myRole,
   myStatus,
+  phaseEndsAt,
   phaseGuide,
   players,
   room,
@@ -48,6 +52,7 @@ export function GameScreen({
   gameNotices: GameNotice[];
   myRole: string;
   myStatus: string;
+  phaseEndsAt: string | null;
   phaseGuide: { title: string; description: string };
   players: GameSessionPlayerView[];
   room: RoomView | null;
@@ -61,6 +66,8 @@ export function GameScreen({
     targetUserId: string,
   ) => void;
 }) {
+  const remainingSeconds = usePhaseRemainingSeconds(phaseEndsAt);
+
   return (
     <section className="play-stage play-stage--game">
       <section className="case-board">
@@ -69,6 +76,11 @@ export function GameScreen({
             <p className="section-kicker">{currentTurn}턴</p>
             <h1>{phaseGuide.title}</h1>
             <p>{phaseGuide.description}</p>
+          </div>
+          <div className="phase-timer-card">
+            <span>자동 전환</span>
+            <strong>{formatRemainingTime(remainingSeconds)}</strong>
+            <small>{phaseEndsAt ? "서버 타이머 기준" : "대기 중"}</small>
           </div>
           <div className="role-card">
             <span>내 역할</span>
@@ -136,7 +148,7 @@ export function GameScreen({
           ) : null}
           {!targetAction && !canAdvancePhase ? (
             <p className="connection-empty">
-              현재 가능한 행동이 없습니다. 다음 서버 이벤트를 기다리는 중입니다.
+              현재 가능한 행동이 없습니다. 타이머가 끝나면 다음 단계로 자동 진행됩니다.
             </p>
           ) : null}
         </div>
@@ -169,4 +181,44 @@ export function GameScreen({
       />
     </section>
   );
+}
+
+function usePhaseRemainingSeconds(phaseEndsAt: string | null) {
+  const targetMs = useMemo(() => {
+    if (!phaseEndsAt) {
+      return null;
+    }
+
+    const parsed = Date.parse(phaseEndsAt);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [phaseEndsAt]);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    setNow(Date.now());
+
+    if (targetMs === null) {
+      return;
+    }
+
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [targetMs]);
+
+  if (targetMs === null) {
+    return null;
+  }
+
+  return Math.max(0, Math.ceil((targetMs - now) / 1000));
+}
+
+function formatRemainingTime(seconds: number | null) {
+  if (seconds === null) {
+    return "--:--";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = seconds % 60;
+
+  return `${String(minutes).padStart(2, "0")}:${String(restSeconds).padStart(2, "0")}`;
 }

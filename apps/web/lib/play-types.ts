@@ -46,6 +46,7 @@ export interface GameSessionView {
   gameId: string;
   phase: GamePhase | string;
   turn: number;
+  phaseEndsAt: string | null;
   players: GameSessionPlayerView[];
 }
 

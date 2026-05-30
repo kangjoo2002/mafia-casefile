@@ -2913,6 +2913,8 @@ test('start game rejects non-host, requires all ready, and starts room', async (
   assert.equal(hostGameStartedEvent.gameId, room.roomId);
   assert.equal(hostGameStartedEvent.startedByUserId, 'start-room-host');
   assert.equal(hostGameStartedEvent.startedAt, guestGameStartedEvent.startedAt);
+  assert.equal(typeof hostGameStartedEvent.phaseEndsAt, 'string');
+  assert.equal(hostGameStartedEvent.phaseEndsAt, guestGameStartedEvent.phaseEndsAt);
   assert.equal(guestGameStartedEvent.gameId, room.roomId);
   assert.equal(hostStartUpdate.room.status, 'IN_PROGRESS');
   assert.equal(guestStartUpdate.room.status, 'IN_PROGRESS');
@@ -3023,6 +3025,97 @@ test('start game rejects non-host, requires all ready, and starts room', async (
   guest1.socket.disconnect();
   guest2.socket.disconnect();
   guest3.socket.disconnect();
+});
+
+test('phase timer automatically advances the game and broadcasts phase change', async () => {
+  const previousNightDuration = process.env.MAFIA_PHASE_NIGHT_SECONDS;
+  process.env.MAFIA_PHASE_NIGHT_SECONDS = '0.05';
+
+  const roomsService = app.get(RoomsService);
+  const gameSessionService = app.get(GameSessionService);
+
+  const room = roomsService.createRoom({
+    hostUserId: 'auto-phase-host',
+    name: 'auto-phase-room',
+  });
+
+  const host = buildAuthedSocket('auto-phase-host', 'auto-phase-host@example.com');
+  const guest1 = buildAuthedSocket('auto-phase-guest-1', 'auto-phase-1@example.com');
+  const guest2 = buildAuthedSocket('auto-phase-guest-2', 'auto-phase-2@example.com');
+  const guest3 = buildAuthedSocket('auto-phase-guest-3', 'auto-phase-3@example.com');
+
+  try {
+    await Promise.all([
+      waitForConnect(host.socket),
+      waitForConnect(guest1.socket),
+      waitForConnect(guest2.socket),
+      waitForConnect(guest3.socket),
+    ]);
+
+    await joinRoomCommand(host.socket, room.roomId, 'host', 'req-auto-join-1');
+    await joinRoomCommand(guest1.socket, room.roomId, 'g1', 'req-auto-join-2');
+    await joinRoomCommand(guest2.socket, room.roomId, 'g2', 'req-auto-join-3');
+    await joinRoomCommand(guest3.socket, room.roomId, 'g3', 'req-auto-join-4');
+
+    await readyRoomCommand(host.socket, room.roomId, true, 'req-auto-ready-1');
+    await readyRoomCommand(guest1.socket, room.roomId, true, 'req-auto-ready-2');
+    await readyRoomCommand(guest2.socket, room.roomId, true, 'req-auto-ready-3');
+    await readyRoomCommand(guest3.socket, room.roomId, true, 'req-auto-ready-4');
+
+    const hostPhaseChanged = waitForEvent<PhaseChangedEvent>(
+      host.socket,
+      'phase:changed',
+    );
+    const guestPhaseChanged = waitForEvent<PhaseChangedEvent>(
+      guest1.socket,
+      'phase:changed',
+    );
+
+    const startResponse = await startGameCommand(
+      host.socket,
+      room.roomId,
+      'req-auto-start',
+    );
+
+    assert.equal(startResponse.type, 'COMMAND_ACCEPTED');
+
+    const [hostPhaseEvent, guestPhaseEvent] = await Promise.all([
+      hostPhaseChanged,
+      guestPhaseChanged,
+    ]);
+
+    for (const event of [hostPhaseEvent, guestPhaseEvent]) {
+      assert.equal(event.type, 'phase:changed');
+      assert.equal(event.gameId, room.roomId);
+      assert.equal(event.fromPhase, 'NIGHT');
+      assert.equal(event.toPhase, 'DAY_DISCUSSION');
+      assert.equal(event.turn, 1);
+      assert.equal(event.requestedByUserId, null);
+      assert.equal(typeof event.phaseEndsAt, 'string');
+    }
+
+    const session = await gameSessionService.findByGameId(room.roomId);
+    assert.ok(session);
+    assert.equal(session.phase, 'DAY_DISCUSSION');
+    assert.equal(session.turn, 1);
+
+    await prisma.gameEventLog.deleteMany({
+      where: {
+        gameId: room.roomId,
+      },
+    });
+  } finally {
+    if (previousNightDuration === undefined) {
+      delete process.env.MAFIA_PHASE_NIGHT_SECONDS;
+    } else {
+      process.env.MAFIA_PHASE_NIGHT_SECONDS = previousNightDuration;
+    }
+
+    host.socket.disconnect();
+    guest1.socket.disconnect();
+    guest2.socket.disconnect();
+    guest3.socket.disconnect();
+  }
 });
 
 test('next phase advances the session and broadcasts phase changes', async () => {

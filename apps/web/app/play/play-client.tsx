@@ -273,6 +273,7 @@ export function PlayClient() {
         normalizeSession(current, roomRef.current, identityUserIdRef.current, {
           phase: "NIGHT",
           turn: 0,
+          phaseEndsAt: event.phaseEndsAt,
         }),
       );
       appendEventLog({
@@ -304,6 +305,7 @@ export function PlayClient() {
         normalizeSession(current, roomRef.current, identityUserIdRef.current, {
           phase: event.toPhase,
           turn: event.turn,
+          phaseEndsAt: event.phaseEndsAt,
         }),
       );
       appendEventLog({
@@ -660,9 +662,7 @@ export function PlayClient() {
     Boolean(chatMessage.trim()) &&
     allowedChatChannels.includes(chatChannel);
   const targetAction = effectiveAvailableActions.find(isTargetAction) ?? null;
-  const canAdvancePhase = effectiveAvailableActions.some(
-    (action) => action.type === "NEXT_PHASE",
-  );
+  const canAdvancePhase = false;
   const phaseGuide = getPhaseGuide({
     phase: currentPhase,
     role: myRole,
@@ -1125,6 +1125,7 @@ export function PlayClient() {
           gameNotices={gameNotices}
           myRole={myRole}
           myStatus={myStatus}
+          phaseEndsAt={session?.phaseEndsAt ?? null}
           phaseGuide={phaseGuide}
           players={gamePlayers}
           room={room}
@@ -1309,6 +1310,8 @@ function parseReconnectSession(value: unknown): GameSessionView | null {
     gameId: session.gameId,
     phase: session.phase,
     turn: session.turn,
+    phaseEndsAt:
+      typeof session.phaseEndsAt === "string" ? session.phaseEndsAt : null,
     players: session.players
       .filter((player) => player && typeof player === "object" && !Array.isArray(player))
       .map((player) => {
@@ -1350,7 +1353,7 @@ function normalizeSession(
   current: GameSessionView | null,
   room: RoomView | null,
   currentUserId: string,
-  patch: Partial<Pick<GameSessionView, "phase" | "turn">>,
+  patch: Partial<Pick<GameSessionView, "phase" | "turn" | "phaseEndsAt">>,
 ): GameSessionView {
   const basePlayers = current?.players?.length
     ? current.players
@@ -1366,6 +1369,7 @@ function normalizeSession(
     gameId: current?.gameId ?? room?.roomId ?? "",
     phase: patch.phase ?? current?.phase ?? "WAITING",
     turn: patch.turn ?? current?.turn ?? 0,
+    phaseEndsAt: patch.phaseEndsAt ?? current?.phaseEndsAt ?? null,
     players: basePlayers,
   };
 }
@@ -1555,14 +1559,6 @@ function deriveAvailableActions(input: {
   );
 
   const actions: AvailableAction[] = [];
-
-  if (
-    input.room?.hostUserId === input.userId &&
-    (input.room.status === "IN_PROGRESS" || Boolean(input.session)) &&
-    input.session.phase !== "FINISHED"
-  ) {
-    actions.push({ type: "NEXT_PHASE" });
-  }
 
   if (effectiveStatus === "DEAD") {
     actions.push({ type: "SEND_CHAT_MESSAGE", channel: "GHOST" });

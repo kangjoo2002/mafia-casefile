@@ -46,6 +46,7 @@ export interface GameStartedEvent {
   gameId: string;
   startedByUserId: string;
   startedAt: string;
+  phaseEndsAt: string | null;
 }
 
 export interface RoleAssignedEvent {
@@ -61,7 +62,8 @@ export interface PhaseChangedEvent {
   fromPhase: GamePhase;
   toPhase: GamePhase;
   turn: number;
-  requestedByUserId: string;
+  requestedByUserId: string | null;
+  phaseEndsAt: string | null;
   changedAt: string;
 }
 

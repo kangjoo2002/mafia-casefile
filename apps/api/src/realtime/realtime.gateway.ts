@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -48,9 +48,10 @@ import type {
 })
 @Injectable()
 export class RealtimeGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
   private readonly logger = new Logger(RealtimeGateway.name);
+  private readonly phaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   @WebSocketServer()
   private server!: Server;
@@ -74,6 +75,14 @@ export class RealtimeGateway
     @Inject(PersonalEventChannelService)
     private readonly personalEventChannelService: PersonalEventChannelService,
   ) {}
+
+  onModuleDestroy() {
+    for (const timer of this.phaseTimers.values()) {
+      clearTimeout(timer);
+    }
+
+    this.phaseTimers.clear();
+  }
 
   afterInit(server: Server) {
     server.use((socket, next) => {
@@ -312,12 +321,127 @@ export class RealtimeGateway
 
       if (effect.kind === 'broadcast') {
         this.emitBroadcast(effect);
+        this.schedulePhaseTimerFromEffect(effect);
         await this.cacheChatMessageEffect(effect, cachedChatMessages);
         continue;
       }
 
       this.emitPrivate(effect);
       await this.cacheChatMessageEffect(effect, cachedChatMessages);
+    }
+  }
+
+  private async applySystemCommandEffects(effects: GameCommandEffect[]) {
+    const cachedChatMessages = new Set<string>();
+
+    for (const effect of effects) {
+      if (effect.kind !== 'broadcast') {
+        continue;
+      }
+
+      this.emitBroadcast(effect);
+      this.schedulePhaseTimerFromEffect(effect);
+      await this.cacheChatMessageEffect(effect, cachedChatMessages);
+    }
+  }
+
+  private schedulePhaseTimerFromEffect(effect: GameCommandBroadcastEffect) {
+    if (effect.eventName !== 'game:started' && effect.eventName !== 'phase:changed') {
+      return;
+    }
+
+    if (
+      !effect.payload ||
+      typeof effect.payload !== 'object' ||
+      Array.isArray(effect.payload)
+    ) {
+      return;
+    }
+
+    const payload = effect.payload as {
+      gameId?: unknown;
+      phaseEndsAt?: unknown;
+    };
+
+    if (
+      typeof payload.gameId !== 'string' ||
+      typeof payload.phaseEndsAt !== 'string'
+    ) {
+      this.clearPhaseTimer(effect.roomId);
+      return;
+    }
+
+    this.schedulePhaseTimer(payload.gameId, payload.phaseEndsAt);
+  }
+
+  private schedulePhaseTimer(gameId: string, phaseEndsAt: string) {
+    const targetMs = Date.parse(phaseEndsAt);
+
+    if (!Number.isFinite(targetMs)) {
+      return;
+    }
+
+    this.clearPhaseTimer(gameId);
+
+    const delayMs = Math.max(0, targetMs - Date.now());
+    const timer = setTimeout(() => {
+      this.phaseTimers.delete(gameId);
+      void this.advancePhaseFromTimer(gameId, phaseEndsAt);
+    }, delayMs);
+
+    this.phaseTimers.set(gameId, timer);
+  }
+
+  private clearPhaseTimer(gameId: string) {
+    const existing = this.phaseTimers.get(gameId);
+
+    if (existing) {
+      clearTimeout(existing);
+      this.phaseTimers.delete(gameId);
+    }
+  }
+
+  private async advancePhaseFromTimer(gameId: string, expectedPhaseEndsAt: string) {
+    const session = await this.gameSessionService.findByGameId(gameId);
+
+    if (
+      !session ||
+      session.phase === 'FINISHED' ||
+      session.phaseEndsAt?.toISOString() !== expectedPhaseEndsAt
+    ) {
+      return;
+    }
+
+    let lock: { gameId: string; token: string } | null = null;
+
+    try {
+      lock = await this.gameCommandLockService.acquire({ gameId });
+    } catch (error) {
+      this.warnGameCommandLockError('acquire timer', gameId, error);
+      return;
+    }
+
+    if (!lock) {
+      this.schedulePhaseTimer(gameId, expectedPhaseEndsAt);
+      return;
+    }
+
+    try {
+      const result = await this.gameCommandService.advancePhaseAutomatically(gameId);
+
+      if (result.type === 'COMMAND_ACCEPTED') {
+        await this.applySystemCommandEffects(result.effects);
+      } else {
+        this.logger.warn(
+          `automatic phase advance rejected ${gameId}: ${result.reason}`,
+        );
+      }
+    } finally {
+      try {
+        await this.gameCommandLockService.release(lock);
+      } catch (error) {
+        this.warnGameCommandLockError('release timer', gameId, error);
+      }
     }
   }
 

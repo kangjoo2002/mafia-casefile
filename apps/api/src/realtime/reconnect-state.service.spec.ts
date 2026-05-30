@@ -263,7 +263,7 @@ test('alive non-mafia player는 MAFIA recent chat을 받지 않는다', async ()
     assert.deepEqual(result.availableActions, [
       {
         type: 'SELECT_DOCTOR_TARGET',
-        targetUserIds: ['mafia-user', 'police-user', 'citizen-user'],
+        targetUserIds: ['mafia-user', 'doctor-user', 'police-user', 'citizen-user'],
       },
     ]);
   } finally {

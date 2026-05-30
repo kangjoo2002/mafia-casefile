@@ -4,7 +4,9 @@
 
 - 게임 시작 전에는 `WAITING` phase에서 room 참가와 준비 상태를 관리한다.
 - 게임이 시작되면 `NIGHT` phase로 진입한다.
-- `NEXT_PHASE` command는 `NIGHT -> DAY_DISCUSSION -> VOTING -> RESULT -> NIGHT` 순서로 phase를 전환한다.
+- 게임 시작 후 서버 타이머가 `NIGHT -> DAY_DISCUSSION -> VOTING -> RESULT -> NIGHT` 순서로 phase를 자동 전환한다.
+- 각 phase의 종료 시각은 `phaseEndsAt`으로 내려간다.
+- 기본 시간은 `NIGHT` 60초, `DAY_DISCUSSION` 180초, `VOTING` 60초, `RESULT` 10초다.
 - `FINISHED` phase는 종료 상태이며, 더 이상 다음 phase로 전환하지 않는다.
 
 ## Turn 규칙
@@ -24,7 +26,6 @@
 - 의사는 자기 자신을 보호할 수 있다.
 - 죽은 player는 밤 액션을 할 수 없다.
 - 죽은 target은 밤 액션 대상이 될 수 없다.
-- 밤 액션은 자기 자신을 대상으로 사용할 수 없다.
 - 밤 액션 결과는 `GameSession.nightActions`에 반영되고, `GameEventLog`에도 기록된다.
 - 경찰 조사 결과는 경찰 player에게만 개인 이벤트로 전달된다.
 - 밤이 종료되면 사망자 또는 의사 보호로 생존한 target 정보가 room에 broadcast된다.
@@ -47,7 +48,7 @@
 
 - 서버는 현재 `phase`, player의 `role`, `status`, `connectionStatus`를 기준으로 클라이언트가 수행 가능한 행동을 계산한다.
 - `availableActions`는 UI 버튼 표시 기준으로 사용할 수 있지만, 실제 command 허용 여부는 서버 검증이 최종 기준이다.
-- `NEXT_PHASE`는 방장에게만 제공된다.
+- phase 진행은 서버 타이머가 담당하므로 `NEXT_PHASE`는 일반 availableActions로 제공하지 않는다.
 - `CAST_VOTE`는 `VOTING` phase의 살아 있는 player에게 제공된다.
 - `SELECT_MAFIA_TARGET`는 `NIGHT` phase의 살아 있는 마피아에게 제공된다.
 - `SELECT_DOCTOR_TARGET`는 `NIGHT` phase의 살아 있는 의사에게 제공되며 자기 자신도 대상에 포함된다.
@@ -69,9 +70,9 @@
 
 ## 처형과 종료
 
-- `NEXT_PHASE`로 `VOTING -> RESULT`를 진행하면 현재 투표 결과를 기준으로 처형이 해소된다.
+- 서버 타이머가 `VOTING -> RESULT`로 전환하면 현재 투표 결과를 기준으로 처형이 해소된다.
 - 가장 많은 표를 받은 대상이 처형되며, 동률이거나 표가 없으면 처형은 생략된다.
-- `NEXT_PHASE`로 `NIGHT -> DAY_DISCUSSION`을 진행하면 밤 선택 결과가 해소된다.
+- 서버 타이머가 `NIGHT -> DAY_DISCUSSION`으로 전환하면 밤 선택 결과가 해소된다.
 - 의사 보호 target과 mafia target이 같으면 밤 사망은 발생하지 않는다.
 - `PlayerExecuted`, `PlayerKilled`, `GameFinished`는 해소 결과와 종료 조건에 따라 기록된다.
 - 마피아가 0명 생존하면 시민 승리다.
@@ -80,7 +81,7 @@
 
 ## 검증 원칙
 
-- `NEXT_PHASE`는 현재 game session의 phase에 따라만 허용된다.
+- 자동 phase 전환은 현재 game session의 phase와 `phaseEndsAt` 기준으로만 허용된다.
 - `PhaseChanged` 사건은 phase 전환이 확정될 때 기록된다.
 - `FINISHED`인 게임은 phase 전환 command를 더 이상 받지 않는다.
 - command 실패는 `COMMAND_REJECTED.reason` 표준 code로 내려가며, UI는 message 대신 reason code를 기준으로 분기해야 한다.

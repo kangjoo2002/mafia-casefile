@@ -704,6 +704,26 @@ p {
   font-size: 1.38rem;
 }
 
+.phase-timer-card {
+  min-width: 142px;
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.phase-timer-card span,
+.phase-timer-card small {
+  color: #cbd5e1;
+}
+
+.phase-timer-card strong {
+  color: #ffffff;
+  font-size: 1.5rem;
+}
+
 .suspect-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

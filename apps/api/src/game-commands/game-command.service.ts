@@ -382,13 +382,15 @@ export class GameCommandService {
 
     try {
       const room = this.roomsService.startGame(parsed.gameId, user.id);
-      const startedAt = new Date().toISOString();
+      const startedAtDate = new Date();
+      const startedAt = startedAtDate.toISOString();
       const roleAssignments = this.buildRoleAssignments(room);
 
-      await this.gameSessionService.startGameSession({
+      const session = await this.gameSessionService.startGameSession({
         gameId: parsed.gameId,
         roomId: parsed.gameId,
         hostUserId: user.id,
+        startedAt: startedAtDate,
         players: roleAssignments.map((assignment, index) => {
           const participant = room.participants.find(
             (current) => current.userId === assignment.userId,
@@ -429,6 +431,7 @@ export class GameCommandService {
             gameId: parsed.gameId,
             startedByUserId: user.id,
             startedAt,
+            phaseEndsAt: session.phaseEndsAt?.toISOString() ?? null,
           },
         },
       ];
@@ -640,6 +643,7 @@ export class GameCommandService {
           toPhase: transition.toPhase,
           turn: transition.toTurn,
           requestedByUserId: user.id,
+          phaseEndsAt: transition.session.phaseEndsAt?.toISOString() ?? null,
         },
         visibilityDuringGame: EventVisibility.PUBLIC,
         visibilityAfterGame: EventVisibility.PUBLIC,
@@ -691,6 +695,7 @@ export class GameCommandService {
             toPhase: transition.toPhase,
             turn: transition.toTurn,
             requestedByUserId: user.id,
+            phaseEndsAt: transition.session.phaseEndsAt?.toISOString() ?? null,
             changedAt,
           },
         },
@@ -759,6 +764,242 @@ export class GameCommandService {
       }
 
       return this.reject(parsed.requestId, reason, message);
+    }
+  }
+
+  async advancePhaseAutomatically(gameId: string): Promise<GameCommandResult> {
+    const requestId = `auto-phase-${gameId}-${Date.now()}`;
+
+    try {
+      const transition = await this.gameSessionService.advancePhase(gameId);
+
+      let resolutionEvent:
+        | {
+            type: 'PlayerKilled' | 'PlayerExecuted';
+            payload: Record<string, unknown>;
+            visibilityDuringGame: EventVisibility;
+          }
+        | undefined;
+      let gameFinishedPayload:
+        | {
+            winnerTeam: 'MAFIA' | 'CITIZEN';
+            reason: string;
+          }
+        | undefined;
+      let nightResolvedPayload:
+        | {
+            attackedUserId: string | null;
+            protectedUserId: string | null;
+            killedUserId: string | null;
+          }
+        | undefined;
+      let votingResolvedPayload:
+        | {
+            executedUserId: string | null;
+            voteResult: { targetUserId: string; count: number }[];
+          }
+        | undefined;
+
+      if (
+        transition.fromPhase === 'NIGHT' &&
+        transition.toPhase === 'DAY_DISCUSSION'
+      ) {
+        const sessionBeforeResolution =
+          await this.gameSessionService.findByGameId(gameId);
+        const attackedUserId =
+          sessionBeforeResolution?.nightActions.mafiaTarget ?? null;
+        const protectedUserId =
+          sessionBeforeResolution?.nightActions.doctorTarget ?? null;
+        const outcome = await this.gameSessionService.resolveNightOutcome(gameId);
+        nightResolvedPayload = {
+          attackedUserId,
+          protectedUserId,
+          killedUserId: outcome.killed?.userId ?? null,
+        };
+
+        if (outcome.killed) {
+          resolutionEvent = {
+            type: 'PlayerKilled',
+            payload: {
+              targetUserId: outcome.killed.userId,
+              cause: 'MAFIA_ATTACK',
+              protectedByDoctor:
+                outcome.protectedTarget?.userId === outcome.killed.userId,
+            },
+            visibilityDuringGame: EventVisibility.PUBLIC,
+          };
+        }
+
+        if (outcome.winnerTeam) {
+          await this.gameSessionService.finishGame(gameId);
+          gameFinishedPayload = {
+            winnerTeam: outcome.winnerTeam,
+            reason:
+              outcome.winnerTeam === 'CITIZEN'
+                ? 'MAFIA_ELIMINATED'
+                : 'MAFIA_PARITY_REACHED',
+          };
+        }
+      }
+
+      if (
+        transition.fromPhase === 'VOTING' &&
+        transition.toPhase === 'RESULT'
+      ) {
+        const outcome = await this.gameSessionService.resolveVotingOutcome(gameId);
+        votingResolvedPayload = {
+          executedUserId: outcome.executed?.userId ?? null,
+          voteResult: outcome.tally,
+        };
+
+        if (outcome.executed) {
+          resolutionEvent = {
+            type: 'PlayerExecuted',
+            payload: {
+              targetUserId: outcome.executed.userId,
+              voteResult: outcome.tally,
+            },
+            visibilityDuringGame: EventVisibility.PUBLIC,
+          };
+        }
+
+        if (outcome.winnerTeam) {
+          await this.gameSessionService.finishGame(gameId);
+          gameFinishedPayload = {
+            winnerTeam: outcome.winnerTeam,
+            reason:
+              outcome.winnerTeam === 'CITIZEN'
+                ? 'MAFIA_ELIMINATED'
+                : 'MAFIA_PARITY_REACHED',
+          };
+        }
+      }
+
+      await this.gameEventRecorder.recordEvent({
+        gameId,
+        type: 'PhaseChanged',
+        turn: transition.toTurn,
+        phase: transition.toPhase,
+        actorUserId: null,
+        payload: {
+          gameId,
+          fromPhase: transition.fromPhase,
+          toPhase: transition.toPhase,
+          turn: transition.toTurn,
+          requestedByUserId: null,
+          phaseEndsAt: transition.session.phaseEndsAt?.toISOString() ?? null,
+        },
+        visibilityDuringGame: EventVisibility.PUBLIC,
+        visibilityAfterGame: EventVisibility.PUBLIC,
+        requestId,
+      });
+
+      if (resolutionEvent) {
+        await this.gameEventRecorder.recordEvent({
+          gameId,
+          type: resolutionEvent.type,
+          turn: transition.toTurn,
+          phase: transition.toPhase,
+          actorUserId: null,
+          payload: resolutionEvent.payload,
+          visibilityDuringGame: resolutionEvent.visibilityDuringGame,
+          visibilityAfterGame: EventVisibility.PUBLIC,
+          requestId,
+        });
+      }
+
+      if (gameFinishedPayload) {
+        const finishedSession = await this.gameSessionService.findByGameId(gameId);
+
+        await this.gameEventRecorder.recordEvent({
+          gameId,
+          type: 'GameFinished',
+          turn: finishedSession?.turn ?? transition.toTurn,
+          phase: finishedSession?.phase ?? transition.toPhase,
+          actorUserId: null,
+          payload: gameFinishedPayload,
+          visibilityDuringGame: EventVisibility.PUBLIC,
+          visibilityAfterGame: EventVisibility.PUBLIC,
+          requestId,
+        });
+      }
+
+      const changedAt = new Date().toISOString();
+      const effects: GameCommandEffect[] = [
+        {
+          kind: 'broadcast',
+          roomId: gameId,
+          eventName: 'phase:changed',
+          payload: {
+            type: 'phase:changed',
+            gameId,
+            fromPhase: transition.fromPhase,
+            toPhase: transition.toPhase,
+            turn: transition.toTurn,
+            requestedByUserId: null,
+            phaseEndsAt: transition.session.phaseEndsAt?.toISOString() ?? null,
+            changedAt,
+          },
+        },
+      ];
+
+      if (nightResolvedPayload) {
+        effects.push({
+          kind: 'broadcast',
+          roomId: gameId,
+          eventName: 'night:resolved',
+          payload: {
+            type: 'night:resolved',
+            gameId,
+            turn: transition.toTurn,
+            ...nightResolvedPayload,
+            resolvedAt: changedAt,
+          },
+        });
+      }
+
+      if (votingResolvedPayload) {
+        effects.push({
+          kind: 'broadcast',
+          roomId: gameId,
+          eventName: 'voting:resolved',
+          payload: {
+            type: 'voting:resolved',
+            gameId,
+            turn: transition.toTurn,
+            ...votingResolvedPayload,
+            resolvedAt: changedAt,
+          },
+        });
+      }
+
+      if (gameFinishedPayload) {
+        effects.push({
+          kind: 'broadcast',
+          roomId: gameId,
+          eventName: 'game:finished',
+          payload: {
+            type: 'game:finished',
+            gameId,
+            ...gameFinishedPayload,
+            finishedAt: changedAt,
+          },
+        });
+      }
+
+      return this.accept(requestId, 'AUTO_PHASE_TIMER', effects);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Phase transition failed.';
+      let reason: CommandRejectReason = 'ROOM_COMMAND_FAILED';
+
+      if (message === 'game session not found') {
+        reason = 'GAME_SESSION_NOT_FOUND';
+      } else if (message === 'game is finished') {
+        reason = 'GAME_ALREADY_FINISHED';
+      }
+
+      return this.reject(requestId, reason, message);
     }
   }
 
