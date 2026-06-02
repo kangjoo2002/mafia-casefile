@@ -15,6 +15,9 @@ export default function Home() {
             <Link className="button button--primary" href="/play">
               게임 시작
             </Link>
+            <Link className="button button--secondary" href="/demo-lab">
+              데모 랩
+            </Link>
             <Link className="button button--secondary" href="/games/sample-game-id/timeline">
               타임라인 보기
             </Link>

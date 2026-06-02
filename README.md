@@ -216,8 +216,11 @@ Client command
 `apps/web`에는 브라우저에서 실제로 4명이 한 판을 진행할 수 있는 최소 UI가 있습니다.
 
 * Vercel Frontend URL: https://mafia-casefile-web.vercel.app/play
+* Demo Lab URL: https://mafia-casefile-web.vercel.app/demo-lab
 * Local Frontend URL: http://localhost:3000/play
 * Local API URL: http://localhost:3001
+
+`/demo-lab`은 한 브라우저에서 4명의 데모 플레이어를 제어하며 실제 Socket.IO command, server event, GameEvent timeline을 관찰하는 포트폴리오용 화면입니다.
 
 ### 실행
 
