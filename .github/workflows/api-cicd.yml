@@ -109,6 +109,7 @@ jobs:
           IMAGE_TAG: sha-${{ github.sha }}
           API_CONTAINER_NAME: mafia-api-1
           API_PORT: 3001
+          SERVER_INSTANCE_ID: api-1
           RUN_MIGRATION: true
           COMPOSE_SOURCE: /tmp/mafia-api-deploy/docker-compose.yml
           SCRIPT_SOURCE: /tmp/mafia-api-deploy/install-or-update-compose.sh
@@ -119,7 +120,7 @@ jobs:
           username: ${{ secrets.OCI_API_SSH_USER }}
           key: ${{ secrets.OCI_API_SSH_PRIVATE_KEY }}
           script_stop: true
-          envs: DEPLOY_DIR,GHCR_OWNER,IMAGE_TAG,API_CONTAINER_NAME,API_PORT,RUN_MIGRATION,COMPOSE_SOURCE,SCRIPT_SOURCE,GHCR_READ_USERNAME,GHCR_READ_TOKEN
+          envs: DEPLOY_DIR,GHCR_OWNER,IMAGE_TAG,API_CONTAINER_NAME,API_PORT,SERVER_INSTANCE_ID,RUN_MIGRATION,COMPOSE_SOURCE,SCRIPT_SOURCE,GHCR_READ_USERNAME,GHCR_READ_TOKEN
           script: |
             chmod +x "$SCRIPT_SOURCE"
             DEPLOY_DIR="$DEPLOY_DIR" \
@@ -127,6 +128,7 @@ jobs:
               IMAGE_TAG="$IMAGE_TAG" \
               API_CONTAINER_NAME="$API_CONTAINER_NAME" \
               API_PORT="$API_PORT" \
+              SERVER_INSTANCE_ID="$SERVER_INSTANCE_ID" \
               RUN_MIGRATION="$RUN_MIGRATION" \
               COMPOSE_SOURCE="$COMPOSE_SOURCE" \
               GHCR_READ_USERNAME="$GHCR_READ_USERNAME" \
@@ -160,6 +162,7 @@ jobs:
           IMAGE_TAG: sha-${{ github.sha }}
           API_CONTAINER_NAME: mafia-api-2
           API_PORT: 3001
+          SERVER_INSTANCE_ID: api-2
           RUN_MIGRATION: false
           COMPOSE_SOURCE: /tmp/mafia-api-deploy/docker-compose.yml
           SCRIPT_SOURCE: /tmp/mafia-api-deploy/install-or-update-compose.sh
@@ -170,7 +173,7 @@ jobs:
           username: ${{ secrets.OCI_API_SSH_USER }}
           key: ${{ secrets.OCI_API_SSH_PRIVATE_KEY }}
           script_stop: true
-          envs: DEPLOY_DIR,GHCR_OWNER,IMAGE_TAG,API_CONTAINER_NAME,API_PORT,RUN_MIGRATION,COMPOSE_SOURCE,SCRIPT_SOURCE,GHCR_READ_USERNAME,GHCR_READ_TOKEN
+          envs: DEPLOY_DIR,GHCR_OWNER,IMAGE_TAG,API_CONTAINER_NAME,API_PORT,SERVER_INSTANCE_ID,RUN_MIGRATION,COMPOSE_SOURCE,SCRIPT_SOURCE,GHCR_READ_USERNAME,GHCR_READ_TOKEN
           script: |
             chmod +x "$SCRIPT_SOURCE"
             DEPLOY_DIR="$DEPLOY_DIR" \
@@ -178,6 +181,7 @@ jobs:
               IMAGE_TAG="$IMAGE_TAG" \
               API_CONTAINER_NAME="$API_CONTAINER_NAME" \
               API_PORT="$API_PORT" \
+              SERVER_INSTANCE_ID="$SERVER_INSTANCE_ID" \
               RUN_MIGRATION="$RUN_MIGRATION" \
               COMPOSE_SOURCE="$COMPOSE_SOURCE" \
               GHCR_READ_USERNAME="$GHCR_READ_USERNAME" \

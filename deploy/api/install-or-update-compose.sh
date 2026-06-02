@@ -7,6 +7,7 @@ GHCR_OWNER="${GHCR_OWNER:-}"
 IMAGE_TAG="${IMAGE_TAG:-}"
 API_CONTAINER_NAME="${API_CONTAINER_NAME:-}"
 API_PORT="${API_PORT:-3001}"
+SERVER_INSTANCE_ID="${SERVER_INSTANCE_ID:-}"
 RUN_MIGRATION="${RUN_MIGRATION:-false}"
 GHCR_READ_USERNAME="${GHCR_READ_USERNAME:-}"
 GHCR_READ_TOKEN="${GHCR_READ_TOKEN:-}"
@@ -16,7 +17,7 @@ mkdir -p "$DEPLOY_DIR"
 compose_target="$DEPLOY_DIR/docker-compose.yml"
 env_target="$DEPLOY_DIR/.env"
 
-for required in GHCR_OWNER IMAGE_TAG API_CONTAINER_NAME GHCR_READ_USERNAME GHCR_READ_TOKEN; do
+for required in GHCR_OWNER IMAGE_TAG API_CONTAINER_NAME SERVER_INSTANCE_ID GHCR_READ_USERNAME GHCR_READ_TOKEN; do
   if [ -z "${!required}" ]; then
     echo "$required is required"
     exit 1
@@ -37,6 +38,7 @@ IMAGE_TAG=${IMAGE_TAG}
 
 API_CONTAINER_NAME=${API_CONTAINER_NAME}
 API_PORT=${API_PORT}
+SERVER_INSTANCE_ID=${SERVER_INSTANCE_ID}
 
 NODE_ENV=production
 PORT=3001
@@ -94,6 +96,7 @@ upsert_kv "GHCR_OWNER" "$GHCR_OWNER" "$env_target"
 upsert_kv "IMAGE_TAG" "$IMAGE_TAG" "$env_target"
 upsert_kv "API_CONTAINER_NAME" "$API_CONTAINER_NAME" "$env_target"
 upsert_kv "API_PORT" "$API_PORT" "$env_target"
+upsert_kv "SERVER_INSTANCE_ID" "$SERVER_INSTANCE_ID" "$env_target"
 
 database_url="$(get_value DATABASE_URL)"
 redis_url="$(get_value REDIS_URL)"
