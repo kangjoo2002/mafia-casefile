@@ -187,7 +187,7 @@ Client command
 * reconnect snapshot과 availableActions 계산
 * Socket.IO Redis Adapter 기반 다중 API 인스턴스 전파 검증
 
-아직 운영 서비스 전체 범위로 포함하지 않은 항목은 다음과 같습니다.
+현재 범위에 포함하지 않은 항목은 다음과 같습니다.
 
 * 공개 서비스용 사용자 매칭과 방 검색 UX
 * 관리자 도구
@@ -248,7 +248,6 @@ Client command
 
 * `POST /api/demo-token`은 로컬 데모용입니다.
 * UI의 availableActions는 reconnect snapshot 또는 client-side phase/role/status 계산을 기준으로 버튼을 표시하며, 실제 권한은 서버 command 검증이 최종 기준입니다.
-* 스크린샷과 GIF 정리는 다음 작업-045에서 진행합니다.
 
 ---
 
@@ -284,8 +283,6 @@ docs/
 └── adr/
 ```
 
-* 프로젝트 기준: `PROJECT_SSOT.md`
-* 구현 계획: `IMPLEMENTATION_PLAN.md`
 * Socket.IO 계약: `docs/SOCKET_PROTOCOL.md`
 * 사건 기록 카탈로그: `docs/EVENT_CATALOG.md`
 * GameSession 구조: `docs/GAME_SESSION.md`
@@ -294,7 +291,7 @@ docs/
 
 ---
 
-## Deployment overview
+## 배포 개요
 
 프론트엔드는 Vercel에서 배포합니다.
 
@@ -303,12 +300,3 @@ docs/
 API CI/CD는 GitHub Actions에서 API Docker image를 GHCR에 push한 뒤 OCI `api-1`/`api-2` 서버에 SSH로 순차 배포합니다. `api-1`, `api-2`는 각각 1 OCPU / 6GB 인스턴스이고, PostgreSQL과 Redis는 2 OCPU / 12GB `infra` 인스턴스에서 실행합니다.
 
 API CD는 api-1 배포 단계에서 Prisma migration을 1회 실행한 뒤 api-1, api-2를 순차 배포합니다.
-
----
-
-## 해석 기준
-
-* 이 README는 현재 구현된 포트폴리오 데모 범위를 기준으로 정리했습니다.
-* `GameEventLog`는 영구 사건 기록의 기준이며, Redis와 Socket.IO 이벤트는 게임 진행과 전달을 위한 경로입니다.
-* 4인 데모 UI는 로컬 검증과 시연을 위한 최소 클라이언트입니다.
-* 운영용 성능 수치와 스크린샷/GIF는 별도 작업에서 추가될 예정입니다.
