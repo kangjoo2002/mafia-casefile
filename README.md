@@ -215,7 +215,7 @@ Client command
 
 `apps/web`에는 브라우저에서 실제로 4명이 한 판을 진행할 수 있는 최소 UI가 있습니다.
 
-* Vercel Frontend URL: https://mafia-casefile.vercel.app/play
+* Vercel Frontend URL: https://mafia-casefile-web.vercel.app/play
 * Local Frontend URL: http://localhost:3000/play
 * Local API URL: http://localhost:3001
 
@@ -298,7 +298,7 @@ docs/
 
 프론트엔드는 Vercel에서 배포합니다.
 
-* Frontend: https://mafia-casefile.vercel.app/play
+* Frontend: https://mafia-casefile-web.vercel.app/play
 
 API CI/CD는 GitHub Actions에서 API Docker image를 GHCR에 push한 뒤 OCI `api-1`/`api-2` 서버에 SSH로 순차 배포합니다. `api-1`, `api-2`는 각각 1 OCPU / 6GB 인스턴스이고, PostgreSQL과 Redis는 2 OCPU / 12GB `infra` 인스턴스에서 실행합니다.
 
