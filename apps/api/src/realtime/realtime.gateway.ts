@@ -64,6 +64,7 @@ export class RealtimeGateway
     OnModuleDestroy
 {
   private readonly logger = new Logger(RealtimeGateway.name);
+  private readonly serverInstanceId = this.resolveServerInstanceId();
   private phaseTimerPoller: ReturnType<typeof setInterval> | null = null;
   private readonly phaseTimerWakeups = new Set<ReturnType<typeof setTimeout>>();
   private phaseTimerPollInProgress = false;
@@ -214,7 +215,7 @@ export class RealtimeGateway
       this.personalEventChannelService.emitToSocket(
         client,
         'reconnect:state',
-        reconnectState,
+        this.withServerInstanceId(reconnectState),
       );
     }
 
@@ -965,10 +966,26 @@ export class RealtimeGateway
         : 'unknown error';
   }
 
+  private withServerInstanceId(
+    event: ReconnectStateEvent,
+  ): ReconnectStateEvent {
+    return {
+      ...event,
+      serverInstanceId: this.serverInstanceId,
+    };
+  }
+
+  private resolveServerInstanceId() {
+    const raw = process.env.SERVER_INSTANCE_ID ?? 'api-local';
+    const normalized = raw.trim().replace(/[^a-zA-Z0-9_-]+/g, '-');
+    return normalized.length > 0 ? normalized.slice(0, 40) : 'api-local';
+  }
+
   private buildNoRoomReconnectState(userId: string): ReconnectStateEvent {
     return {
       type: 'reconnect:state',
       userId,
+      serverInstanceId: this.serverInstanceId,
       restored: false,
       roomId: null,
       gameId: null,
@@ -984,6 +1001,7 @@ export class RealtimeGateway
     return {
       type: 'reconnect:state',
       userId,
+      serverInstanceId: this.serverInstanceId,
       restored: false,
       roomId: null,
       gameId: null,

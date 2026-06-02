@@ -23,6 +23,7 @@ import { RealtimeModule } from './realtime.module';
 import { io, Socket } from 'socket.io-client';
 
 process.env.JWT_SECRET = 'test-secret';
+process.env.SERVER_INSTANCE_ID = 'api-test/one';
 
 let app: Awaited<ReturnType<typeof NestFactory.create>>;
 let client: Socket | undefined;
@@ -522,6 +523,7 @@ test('reconnect:state는 reconnect한 socket에만 전달된다', async () => {
 
   assert.equal(initialReconnectState.type, 'reconnect:state');
   assert.equal(initialReconnectState.userId, 'personal-reconnect-user');
+  assert.equal(initialReconnectState.serverInstanceId, 'api-test-one');
   assert.equal(initialReconnectState.reason, 'NO_ROOM');
 
   const socketB = io(getUrl(), {
@@ -548,6 +550,7 @@ test('reconnect:state는 reconnect한 socket에만 전달된다', async () => {
 
     assert.equal(reconnectState.type, 'reconnect:state');
     assert.equal(reconnectState.userId, 'personal-reconnect-user');
+    assert.equal(reconnectState.serverInstanceId, 'api-test-one');
   } finally {
     socketA.disconnect();
     socketB.disconnect();
@@ -1287,6 +1290,7 @@ test('lock busy reconnect still restores reconnect state from previous room', as
     assert.equal(reconnectState.type, 'reconnect:state');
     assert.equal(reconnectState.restored, true);
     assert.equal(reconnectState.reason, 'RESTORED');
+    assert.equal(reconnectState.serverInstanceId, 'api-test-one');
     assert.equal(reconnectState.roomId, room.roomId);
     assert.equal(reconnectState.gameId, room.roomId);
     assert.ok(reconnectState.session);

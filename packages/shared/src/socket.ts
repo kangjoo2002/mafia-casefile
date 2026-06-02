@@ -130,6 +130,7 @@ export interface ReconnectChatChannelSnapshot {
 export interface ReconnectStateEvent {
   type: "reconnect:state";
   userId: string;
+  serverInstanceId?: string;
   restored: boolean;
   roomId: string | null;
   gameId: string | null;

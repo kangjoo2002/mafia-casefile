@@ -28,6 +28,7 @@ reconnect는 command가 아니라 connection lifecycle event다. 서버는 recon
 {
   "type": "reconnect:state",
   "userId": "user-1",
+  "serverInstanceId": "api-1",
   "restored": true,
   "roomId": "room-123",
   "gameId": "room-123",
@@ -51,6 +52,7 @@ reconnect는 command가 아니라 connection lifecycle event다. 서버는 recon
 
 `reason`은 `RESTORED`, `NO_PREVIOUS_STATE`, `NO_ROOM`, `GAME_SESSION_NOT_FOUND`, `PLAYER_NOT_IN_GAME` 중 하나다. recent chat은 권한에 맞는 channel만 포함하며, `SYSTEM`은 포함하지 않는다.
 `availableActions`는 reconnect 시점 snapshot이며, 현재 phase/role/status/connectionStatus 기준으로 계산한 클라이언트 권한 힌트다. 실제 command 허용 여부는 서버 검증이 최종 기준이다.
+`serverInstanceId`는 현재 socket이 연결된 API 인스턴스를 구분하기 위한 안전한 label이다. 값은 `SERVER_INSTANCE_ID` 환경 변수에서 읽으며 내부 IP나 hostname 원문을 노출하지 않도록 짧은 label만 사용한다. 설정하지 않으면 `api-local`을 내려준다.
 
 ## 개인 이벤트 채널
 
